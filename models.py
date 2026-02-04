@@ -368,25 +368,32 @@ def is_future(date_str: str) -> bool:
 
 
 def get_week_dates(reference_date: date_type = None) -> list[date_type]:
-    """Get all dates in the week containing the reference date (Monday-Sunday)."""
+    """Get all dates in the week containing the reference date (Sunday-Saturday)."""
     if reference_date is None:
         reference_date = date_type.today()
-    
-    monday = reference_date - timedelta(days=reference_date.weekday())
-    return [monday + timedelta(days=i) for i in range(7)]
+
+    start = reference_date - timedelta(days=(reference_date.weekday() + 1) % 7)
+    return [start + timedelta(days=i) for i in range(7)]
 
 
-def get_month_weeks(year: int, month: int) -> list[list[Optional[date_type]]]:
-    """Get all weeks in a month as a list of 7-day lists."""
+def get_month_bounds(year: int, month: int) -> tuple[date_type, date_type]:
+    """Get the first and last dates for a given month."""
     first_day = date_type(year, month, 1)
-    
     if month == 12:
         last_day = date_type(year + 1, 1, 1) - timedelta(days=1)
     else:
         last_day = date_type(year, month + 1, 1) - timedelta(days=1)
+    return first_day, last_day
+
+
+def get_month_weeks(year: int, month: int) -> list[list[Optional[date_type]]]:
+    """Get all weeks in a month as a list of 7-day lists."""
+    first_day, last_day = get_month_bounds(year, month)
     
     weeks = []
-    current_week: list[Optional[date_type]] = [None] * first_day.weekday()
+    # Start weeks on Sunday to align with the UI headers.
+    start_offset = (first_day.weekday() + 1) % 7
+    current_week: list[Optional[date_type]] = [None] * start_offset
     
     current_date = first_day
     while current_date <= last_day:

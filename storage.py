@@ -7,9 +7,9 @@ import json
 import csv
 import os
 from io import StringIO
-from datetime import date, datetime, timedelta
+from datetime import date, datetime
 from typing import Optional
-from models import Day, Statistics, MonthlyStatistics, CompletionStatus
+from models import Day, Statistics, MonthlyStatistics, CompletionStatus, get_month_bounds
 
 
 DATA_FILE = "dayplan_data.json"
@@ -207,11 +207,7 @@ class Storage:
         stats = MonthlyStatistics(year=year, month=month)
         
         # Get first and last day of month
-        first_day = date(year, month, 1)
-        if month == 12:
-            last_day = date(year + 1, 1, 1) - timedelta(days=1)
-        else:
-            last_day = date(year, month + 1, 1) - timedelta(days=1)
+        first_day, last_day = get_month_bounds(year, month)
         
         days_in_month = self.get_days_in_range(first_day, last_day)
         

@@ -2,12 +2,12 @@
 DayPlan - A calendar-style day planner with task completion tracking.
 """
 
-from datetime import date, datetime, timedelta
+from datetime import date
 from flask import Flask, render_template, request, jsonify, Response
 
 from models import (
     get_display_date, get_short_date, get_day_number, get_weekday_name,
-    get_month_year, get_month_weeks, is_today, is_past, is_future,
+    get_month_year, get_month_weeks, get_month_bounds, is_today, is_past, is_future,
     CompletionStatus
 )
 from storage import storage
@@ -16,9 +16,27 @@ from storage import storage
 app = Flask(__name__)
 
 
+def _day_metrics(day) -> dict:
+    """Build a consistent completion payload for a day."""
+    if not day:
+        return {
+            "completion_status": None,
+            "completion_percentage": 0,
+            "completed_count": 0,
+            "total_count": 0
+        }
+    return {
+        "completion_status": day.completion_status.value,
+        "completion_percentage": day.completion_percentage,
+        "completed_count": day.completed_count,
+        "total_count": day.total_count
+    }
+
+
 @app.context_processor
 def utility_processor():
     """Add utility functions to Jinja2 templates."""
+    today = date.today()
     return {
         "get_display_date": get_display_date,
         "get_short_date": get_short_date,
@@ -29,17 +47,18 @@ def utility_processor():
         "is_past": is_past,
         "is_future": is_future,
         "CompletionStatus": CompletionStatus,
-        "today": date.today().isoformat(),
-        "today_date": date.today()
+        "today": today.isoformat(),
+        "today_date": today
     }
 
 
 @app.route("/")
 def index():
     """Main calendar view."""
+    today = date.today()
     # Get current month/year from query params or use today
-    year = request.args.get("year", date.today().year, type=int)
-    month = request.args.get("month", date.today().month, type=int)
+    year = request.args.get("year", today.year, type=int)
+    month = request.args.get("month", today.month, type=int)
     
     # Handle month overflow
     if month < 1:
@@ -56,11 +75,7 @@ def index():
     weeks = get_month_weeks(year, month)
     
     # Get all days in month range
-    first_date = date(year, month, 1)
-    if month == 12:
-        last_date = date(year + 1, 1, 1) - timedelta(days=1)
-    else:
-        last_date = date(year, month + 1, 1) - timedelta(days=1)
+    first_date, last_date = get_month_bounds(year, month)
     
     days_data = storage.get_days_in_range(first_date, last_date)
     
@@ -73,20 +88,14 @@ def index():
                 calendar_days.append(None)
             else:
                 day_obj = days_data.get(day_date.isoformat())
-                if day_obj:
-                    calendar_days.append({
-                        "day": day_obj,
-                        "day_num": day_date.day,
-                        "is_today": is_today(day_date)
-                    })
-                else:
+                if not day_obj:
                     # Create the day if it doesn't exist
                     day_obj = storage.add_day(day_date)
-                    calendar_days.append({
-                        "day": day_obj,
-                        "day_num": day_date.day,
-                        "is_today": is_today(day_date)
-                    })
+                calendar_days.append({
+                    "day": day_obj,
+                    "day_num": day_date.day,
+                    "is_today": is_today(day_date)
+                })
     
     # Get statistics
     stats = storage.get_statistics()
@@ -111,8 +120,8 @@ def index():
         selected_day = storage.get_day(selected_day_id)
         if selected_day:
             selected_date_display = get_display_date(selected_day.date)
-    elif date.today().year == year and date.today().month == month:
-        selected_day = storage.get_day_by_date(date.today())
+    elif today.year == year and today.month == month:
+        selected_day = storage.get_day_by_date(today)
         if selected_day:
             selected_date_display = get_display_date(selected_day.date)
     
@@ -134,7 +143,7 @@ def index():
 @app.route("/api/days", methods=["POST"])
 def add_day():
     """Add a new day."""
-    data = request.get_json()
+    data = request.get_json(silent=True) or {}
     date_str = data.get("date")
     
     if date_str:
@@ -180,7 +189,7 @@ def delete_day(day_id: str):
 @app.route("/api/days/<day_id>/tasks", methods=["POST"])
 def add_task(day_id: str):
     """Add a task to a day."""
-    data = request.get_json()
+    data = request.get_json(silent=True) or {}
     title = data.get("title", "").strip()
     
     if not title:
@@ -192,10 +201,7 @@ def add_task(day_id: str):
         return jsonify({
             "success": True, 
             "task": task,
-            "completion_status": day.completion_status.value if day else None,
-            "completion_percentage": day.completion_percentage if day else 0,
-            "completed_count": day.completed_count if day else 0,
-            "total_count": day.total_count if day else 0
+            **_day_metrics(day)
         })
     
     return jsonify({"success": False, "error": "Day not found"}), 404
@@ -211,10 +217,7 @@ def toggle_task(day_id: str, task_id: str):
         return jsonify({
             "success": True,
             "completed": task.completed if task else False,
-            "completion_status": day.completion_status.value if day else None,
-            "completion_percentage": day.completion_percentage if day else 0,
-            "completed_count": day.completed_count if day else 0,
-            "total_count": day.total_count if day else 0,
+            **_day_metrics(day),
             "stats": stats.to_dict()
         })
     return jsonify({"success": False, "error": "Task not found"}), 404
@@ -227,10 +230,7 @@ def delete_task(day_id: str, task_id: str):
         day = storage.get_day(day_id)
         return jsonify({
             "success": True,
-            "completion_status": day.completion_status.value if day else None,
-            "completion_percentage": day.completion_percentage if day else 0,
-            "completed_count": day.completed_count if day else 0,
-            "total_count": day.total_count if day else 0
+            **_day_metrics(day)
         })
     return jsonify({"success": False, "error": "Task not found"}), 404
 
@@ -238,7 +238,7 @@ def delete_task(day_id: str, task_id: str):
 @app.route("/api/days/<day_id>/tasks/<task_id>", methods=["PUT"])
 def edit_task(day_id: str, task_id: str):
     """Edit a task's title."""
-    data = request.get_json()
+    data = request.get_json(silent=True) or {}
     title = data.get("title", "").strip()
     
     if not title:
@@ -266,7 +266,7 @@ def toggle_task_expand(day_id: str, task_id: str):
 @app.route("/api/days/<day_id>/tasks/<task_id>/subtasks", methods=["POST"])
 def add_subtask(day_id: str, task_id: str):
     """Add a subtask to a task."""
-    data = request.get_json()
+    data = request.get_json(silent=True) or {}
     title = data.get("title", "").strip()
     
     if not title:
@@ -321,6 +321,7 @@ def get_statistics():
 
 
 @app.route("/api/export/json")
+@app.route("/export/json")
 def export_json():
     """Export data as JSON file."""
     data = storage.export_json()
@@ -332,6 +333,7 @@ def export_json():
 
 
 @app.route("/api/export/csv")
+@app.route("/export/csv")
 def export_csv():
     """Export data as CSV file."""
     data = storage.export_csv()
