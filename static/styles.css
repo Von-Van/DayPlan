@@ -1,0 +1,763 @@
+/* ========================================
+   DayPlan - Modern Dark Theme Styles
+   ======================================== */
+
+:root {
+    /* Colors */
+    --bg-primary: #0d1117;
+    --bg-secondary: #161b22;
+    --bg-tertiary: #21262d;
+    --bg-hover: #30363d;
+    
+    --text-primary: #f0f6fc;
+    --text-secondary: #8b949e;
+    --text-muted: #6e7681;
+    
+    --accent-primary: #58a6ff;
+    --accent-success: #3fb950;
+    --accent-warning: #d29922;
+    --accent-danger: #f85149;
+    --accent-purple: #a371f7;
+    
+    --border-color: #30363d;
+    --border-light: #21262d;
+    
+    /* Completion Status Colors */
+    --status-empty: #6e7681;
+    --status-none: #f85149;
+    --status-partial: #d29922;
+    --status-complete: #3fb950;
+    
+    /* Spacing */
+    --spacing-xs: 4px;
+    --spacing-sm: 8px;
+    --spacing-md: 16px;
+    --spacing-lg: 24px;
+    --spacing-xl: 32px;
+    
+    /* Border Radius */
+    --radius-sm: 6px;
+    --radius-md: 8px;
+    --radius-lg: 12px;
+    --radius-xl: 16px;
+    
+    /* Transitions */
+    --transition-fast: 150ms ease;
+    --transition-normal: 250ms ease;
+    
+    /* Shadows */
+    --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.3);
+    --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.4);
+    --shadow-lg: 0 8px 24px rgba(0, 0, 0, 0.5);
+}
+
+/* ========================================
+   Reset & Base Styles
+   ======================================== */
+
+* {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+}
+
+body {
+    font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+    background: var(--bg-primary);
+    color: var(--text-primary);
+    min-height: 100vh;
+    line-height: 1.5;
+}
+
+/* ========================================
+   Layout - Three Panel Design
+   ======================================== */
+
+.app-container {
+    display: grid;
+    grid-template-columns: 260px 1fr 340px;
+    min-height: 100vh;
+    max-width: 1800px;
+    margin: 0 auto;
+}
+
+/* ========================================
+   Sidebar Styles
+   ======================================== */
+
+.sidebar {
+    background: var(--bg-secondary);
+    border-right: 1px solid var(--border-color);
+    padding: var(--spacing-lg);
+    display: flex;
+    flex-direction: column;
+    gap: var(--spacing-lg);
+}
+
+.sidebar-right {
+    border-right: none;
+    border-left: 1px solid var(--border-color);
+}
+
+.sidebar-header {
+    padding-bottom: var(--spacing-md);
+    border-bottom: 1px solid var(--border-light);
+}
+
+.logo {
+    font-size: 1.5rem;
+    font-weight: 700;
+    background: linear-gradient(135deg, var(--accent-primary), var(--accent-purple));
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+}
+
+/* Stats Section */
+.stats-section h3,
+.export-section h3 {
+    font-size: 0.75rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    color: var(--text-secondary);
+    margin-bottom: var(--spacing-md);
+}
+
+.stat-card {
+    background: var(--bg-tertiary);
+    padding: var(--spacing-md);
+    border-radius: var(--radius-md);
+    margin-bottom: var(--spacing-sm);
+    display: flex;
+    flex-direction: column;
+    transition: var(--transition-fast);
+}
+
+.stat-card:hover {
+    background: var(--bg-hover);
+}
+
+.stat-card.highlight {
+    background: linear-gradient(135deg, rgba(88, 166, 255, 0.15), rgba(163, 113, 247, 0.15));
+    border: 1px solid rgba(88, 166, 255, 0.3);
+}
+
+.stat-value {
+    font-size: 1.75rem;
+    font-weight: 700;
+    color: var(--text-primary);
+}
+
+.stat-label {
+    font-size: 0.8rem;
+    color: var(--text-secondary);
+}
+
+/* Export Section */
+.export-section {
+    margin-top: auto;
+}
+
+.btn-export {
+    display: block;
+    padding: var(--spacing-sm) var(--spacing-md);
+    background: var(--bg-tertiary);
+    color: var(--text-primary);
+    text-decoration: none;
+    border-radius: var(--radius-md);
+    margin-bottom: var(--spacing-sm);
+    text-align: center;
+    font-size: 0.9rem;
+    transition: var(--transition-fast);
+}
+
+.btn-export:hover {
+    background: var(--bg-hover);
+}
+
+/* ========================================
+   Main Content - Calendar
+   ======================================== */
+
+.main-content {
+    padding: var(--spacing-lg);
+    display: flex;
+    flex-direction: column;
+    gap: var(--spacing-lg);
+}
+
+/* Monthly Summary Bar */
+.monthly-summary {
+    display: flex;
+    gap: var(--spacing-md);
+    background: var(--bg-secondary);
+    padding: var(--spacing-md) var(--spacing-lg);
+    border-radius: var(--radius-lg);
+    border: 1px solid var(--border-color);
+}
+
+.summary-stat {
+    flex: 1;
+    display: flex;
+    align-items: center;
+    gap: var(--spacing-sm);
+    padding: var(--spacing-sm) var(--spacing-md);
+    background: var(--bg-tertiary);
+    border-radius: var(--radius-md);
+}
+
+.summary-stat.highlight {
+    background: linear-gradient(135deg, rgba(63, 185, 80, 0.15), rgba(63, 185, 80, 0.05));
+    border: 1px solid rgba(63, 185, 80, 0.3);
+}
+
+.summary-icon {
+    font-size: 1.25rem;
+}
+
+.summary-value {
+    font-size: 1.25rem;
+    font-weight: 700;
+    color: var(--text-primary);
+}
+
+.summary-label {
+    font-size: 0.75rem;
+    color: var(--text-secondary);
+}
+
+/* Calendar Header */
+.calendar-header {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: var(--spacing-lg);
+}
+
+.month-title {
+    font-size: 1.5rem;
+    font-weight: 600;
+    min-width: 200px;
+    text-align: center;
+}
+
+.nav-btn {
+    width: 40px;
+    height: 40px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: var(--bg-secondary);
+    color: var(--text-primary);
+    text-decoration: none;
+    border-radius: var(--radius-md);
+    font-size: 1.5rem;
+    transition: var(--transition-fast);
+    border: 1px solid var(--border-color);
+}
+
+.nav-btn:hover {
+    background: var(--bg-hover);
+    border-color: var(--accent-primary);
+}
+
+/* Calendar Grid */
+.calendar-grid {
+    display: grid;
+    grid-template-columns: repeat(7, 1fr);
+    gap: var(--spacing-sm);
+}
+
+.weekday-header {
+    padding: var(--spacing-sm);
+    text-align: center;
+    font-size: 0.75rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    color: var(--text-secondary);
+}
+
+.calendar-day {
+    aspect-ratio: 1;
+    background: var(--bg-secondary);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-md);
+    padding: var(--spacing-sm);
+    cursor: pointer;
+    transition: var(--transition-fast);
+    display: flex;
+    flex-direction: column;
+    min-height: 80px;
+}
+
+.calendar-day:hover {
+    border-color: var(--accent-primary);
+    transform: translateY(-2px);
+    box-shadow: var(--shadow-md);
+}
+
+.calendar-day.empty {
+    background: transparent;
+    border: 1px dashed var(--border-light);
+    cursor: default;
+}
+
+.calendar-day.empty:hover {
+    transform: none;
+    box-shadow: none;
+    border-color: var(--border-light);
+}
+
+.calendar-day.today {
+    border-color: var(--accent-primary);
+    background: rgba(88, 166, 255, 0.1);
+}
+
+.calendar-day.selected {
+    border-color: var(--accent-purple);
+    background: rgba(163, 113, 247, 0.15);
+    box-shadow: 0 0 0 2px rgba(163, 113, 247, 0.3);
+}
+
+.day-number {
+    font-weight: 600;
+    font-size: 0.95rem;
+    color: var(--text-primary);
+}
+
+.calendar-day.today .day-number {
+    color: var(--accent-primary);
+}
+
+.day-indicators {
+    display: flex;
+    gap: 4px;
+    margin-top: auto;
+    flex-wrap: wrap;
+    align-items: center;
+}
+
+.task-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: var(--status-empty);
+}
+
+.task-dot.empty { background: var(--status-empty); }
+.task-dot.none { background: var(--status-none); }
+.task-dot.partial { background: var(--status-partial); }
+.task-dot.complete { background: var(--status-complete); }
+
+.more-indicator {
+    font-size: 0.65rem;
+    color: var(--text-muted);
+    font-weight: 500;
+}
+
+/* ========================================
+   Right Sidebar - Day Panel
+   ======================================== */
+
+.day-panel {
+    height: 100%;
+    display: flex;
+    flex-direction: column;
+}
+
+.panel-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding-bottom: var(--spacing-md);
+    border-bottom: 1px solid var(--border-light);
+    margin-bottom: var(--spacing-md);
+}
+
+.panel-date {
+    font-size: 1.1rem;
+    font-weight: 600;
+}
+
+.panel-badge {
+    background: var(--bg-tertiary);
+    padding: var(--spacing-xs) var(--spacing-sm);
+    border-radius: var(--radius-sm);
+    font-size: 0.75rem;
+    color: var(--text-secondary);
+}
+
+/* Empty Panel State */
+.empty-panel {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: var(--spacing-md);
+    color: var(--text-muted);
+}
+
+.empty-icon {
+    font-size: 3rem;
+    opacity: 0.5;
+}
+
+/* Task List */
+.task-list {
+    flex: 1;
+    overflow-y: auto;
+    display: flex;
+    flex-direction: column;
+    gap: var(--spacing-sm);
+    padding-right: var(--spacing-xs);
+}
+
+.task-item {
+    background: var(--bg-tertiary);
+    border-radius: var(--radius-md);
+    border-left: 3px solid var(--status-empty);
+    overflow: hidden;
+    transition: var(--transition-fast);
+}
+
+.task-item.empty { border-left-color: var(--status-empty); }
+.task-item.none { border-left-color: var(--status-none); }
+.task-item.partial { border-left-color: var(--status-partial); }
+.task-item.complete { border-left-color: var(--status-complete); }
+
+.task-header {
+    display: flex;
+    align-items: center;
+    gap: var(--spacing-sm);
+    padding: var(--spacing-md);
+    cursor: pointer;
+    transition: var(--transition-fast);
+}
+
+.task-header:hover {
+    background: var(--bg-hover);
+}
+
+.expand-icon {
+    font-size: 0.7rem;
+    color: var(--text-muted);
+    transition: var(--transition-fast);
+    width: 12px;
+}
+
+.task-checkbox {
+    width: 18px;
+    height: 18px;
+    accent-color: var(--accent-success);
+    cursor: pointer;
+}
+
+.task-title {
+    flex: 1;
+    font-size: 0.9rem;
+    cursor: pointer;
+}
+
+.task-item.complete .task-title {
+    text-decoration: line-through;
+    color: var(--text-muted);
+}
+
+.btn-icon {
+    width: 24px;
+    height: 24px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: transparent;
+    border: none;
+    color: var(--text-muted);
+    cursor: pointer;
+    border-radius: var(--radius-sm);
+    font-size: 1rem;
+    opacity: 0;
+    transition: var(--transition-fast);
+}
+
+.task-header:hover .btn-icon {
+    opacity: 1;
+}
+
+.btn-icon:hover {
+    background: var(--accent-danger);
+    color: white;
+}
+
+/* Subtask Container */
+.subtask-container {
+    overflow: hidden;
+    transition: max-height 0.3s ease, padding 0.3s ease;
+}
+
+.subtask-container.collapsed {
+    max-height: 0;
+    padding: 0 var(--spacing-md);
+}
+
+.subtask-container.expanded {
+    max-height: 500px;
+    padding: 0 var(--spacing-md) var(--spacing-md);
+}
+
+/* Subtask Progress */
+.subtask-progress {
+    display: flex;
+    align-items: center;
+    gap: var(--spacing-sm);
+    margin-bottom: var(--spacing-sm);
+    padding-left: var(--spacing-lg);
+}
+
+.progress-bar {
+    flex: 1;
+    height: 4px;
+    background: var(--bg-hover);
+    border-radius: 2px;
+    overflow: hidden;
+}
+
+.progress-fill {
+    height: 100%;
+    background: var(--accent-success);
+    transition: width 0.3s ease;
+}
+
+.progress-text {
+    font-size: 0.7rem;
+    color: var(--text-muted);
+    min-width: 30px;
+}
+
+/* Subtask List */
+.subtask-list {
+    list-style: none;
+    margin-left: var(--spacing-lg);
+    display: flex;
+    flex-direction: column;
+    gap: var(--spacing-xs);
+}
+
+.subtask-item {
+    display: flex;
+    align-items: center;
+    gap: var(--spacing-sm);
+    padding: var(--spacing-xs) var(--spacing-sm);
+    border-radius: var(--radius-sm);
+    transition: var(--transition-fast);
+}
+
+.subtask-item:hover {
+    background: var(--bg-hover);
+}
+
+.subtask-checkbox {
+    width: 14px;
+    height: 14px;
+    accent-color: var(--accent-success);
+}
+
+.subtask-item label {
+    flex: 1;
+    font-size: 0.8rem;
+    color: var(--text-secondary);
+}
+
+.subtask-item input:checked + label {
+    text-decoration: line-through;
+    color: var(--text-muted);
+}
+
+.btn-icon-sm {
+    width: 18px;
+    height: 18px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: transparent;
+    border: none;
+    color: var(--text-muted);
+    cursor: pointer;
+    border-radius: var(--radius-sm);
+    font-size: 0.8rem;
+    opacity: 0;
+    transition: var(--transition-fast);
+}
+
+.subtask-item:hover .btn-icon-sm {
+    opacity: 1;
+}
+
+.btn-icon-sm:hover {
+    color: var(--accent-danger);
+}
+
+/* Add Subtask */
+.add-subtask {
+    display: flex;
+    gap: var(--spacing-xs);
+    margin-left: var(--spacing-lg);
+    margin-top: var(--spacing-sm);
+}
+
+.subtask-input {
+    flex: 1;
+    background: var(--bg-secondary);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-sm);
+    padding: var(--spacing-xs) var(--spacing-sm);
+    color: var(--text-primary);
+    font-size: 0.8rem;
+}
+
+.subtask-input:focus {
+    outline: none;
+    border-color: var(--accent-primary);
+}
+
+.btn-add-subtask {
+    width: 26px;
+    height: 26px;
+    background: var(--accent-primary);
+    border: none;
+    border-radius: var(--radius-sm);
+    color: white;
+    cursor: pointer;
+    font-size: 1rem;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: var(--transition-fast);
+}
+
+.btn-add-subtask:hover {
+    background: var(--accent-purple);
+}
+
+/* Add Task Form */
+.add-task-form {
+    display: flex;
+    gap: var(--spacing-sm);
+    padding-top: var(--spacing-md);
+    border-top: 1px solid var(--border-light);
+    margin-top: auto;
+}
+
+.add-task-form input {
+    flex: 1;
+    background: var(--bg-tertiary);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-md);
+    padding: var(--spacing-sm) var(--spacing-md);
+    color: var(--text-primary);
+    font-size: 0.9rem;
+}
+
+.add-task-form input:focus {
+    outline: none;
+    border-color: var(--accent-primary);
+}
+
+.btn {
+    padding: var(--spacing-sm) var(--spacing-md);
+    border: none;
+    border-radius: var(--radius-md);
+    font-size: 0.9rem;
+    font-weight: 500;
+    cursor: pointer;
+    transition: var(--transition-fast);
+}
+
+.btn-primary {
+    background: var(--accent-primary);
+    color: white;
+}
+
+.btn-primary:hover {
+    background: var(--accent-purple);
+}
+
+/* ========================================
+   Scrollbar Styling
+   ======================================== */
+
+::-webkit-scrollbar {
+    width: 6px;
+}
+
+::-webkit-scrollbar-track {
+    background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+    background: var(--bg-hover);
+    border-radius: 3px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+    background: var(--text-muted);
+}
+
+/* ========================================
+   Responsive Design
+   ======================================== */
+
+@media (max-width: 1200px) {
+    .app-container {
+        grid-template-columns: 1fr;
+    }
+    
+    .sidebar-left {
+        display: none;
+    }
+    
+    .sidebar-right {
+        position: fixed;
+        right: 0;
+        top: 0;
+        bottom: 0;
+        width: 340px;
+        transform: translateX(100%);
+        transition: transform 0.3s ease;
+        z-index: 100;
+    }
+    
+    .sidebar-right.open {
+        transform: translateX(0);
+    }
+    
+    .monthly-summary {
+        flex-wrap: wrap;
+    }
+    
+    .summary-stat {
+        flex: 1 1 45%;
+    }
+}
+
+@media (max-width: 768px) {
+    .calendar-grid {
+        gap: 4px;
+    }
+    
+    .calendar-day {
+        min-height: 60px;
+        padding: var(--spacing-xs);
+    }
+    
+    .day-number {
+        font-size: 0.8rem;
+    }
+    
+    .task-dot {
+        width: 6px;
+        height: 6px;
+    }
+}

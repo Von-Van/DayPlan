@@ -1,0 +1,191 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>DayPlan - Personal Planner</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+</head>
+<body>
+    <div class="app-container">
+        <!-- Left Sidebar - Statistics -->
+        <aside class="sidebar sidebar-left">
+            <div class="sidebar-header">
+                <h1 class="logo">📅 DayPlan</h1>
+            </div>
+            
+            <div class="stats-section">
+                <h3>All-Time Stats</h3>
+                <div class="stat-card">
+                    <span class="stat-value">{{ stats.total_days }}</span>
+                    <span class="stat-label">Days Tracked</span>
+                </div>
+                <div class="stat-card">
+                    <span class="stat-value">{{ stats.total_tasks }}</span>
+                    <span class="stat-label">Total Tasks</span>
+                </div>
+                <div class="stat-card">
+                    <span class="stat-value">{{ stats.completed_tasks }}</span>
+                    <span class="stat-label">Completed</span>
+                </div>
+                <div class="stat-card highlight">
+                    <span class="stat-value">{{ "%.0f"|format(stats.completion_rate) }}%</span>
+                    <span class="stat-label">Completion Rate</span>
+                </div>
+            </div>
+            
+            <div class="export-section">
+                <h3>Export Data</h3>
+                <a href="/export/json" class="btn btn-export">📄 Export JSON</a>
+                <a href="/export/csv" class="btn btn-export">📊 Export CSV</a>
+            </div>
+        </aside>
+
+        <!-- Main Content - Calendar -->
+        <main class="main-content">
+            <!-- Monthly Summary Bar -->
+            <div class="monthly-summary">
+                <div class="summary-stat">
+                    <span class="summary-icon">📅</span>
+                    <span class="summary-value">{{ monthly_stats.days_with_tasks }}</span>
+                    <span class="summary-label">Active Days</span>
+                </div>
+                <div class="summary-stat">
+                    <span class="summary-icon">📋</span>
+                    <span class="summary-value">{{ monthly_stats.total_tasks }}</span>
+                    <span class="summary-label">Tasks</span>
+                </div>
+                <div class="summary-stat">
+                    <span class="summary-icon">✅</span>
+                    <span class="summary-value">{{ monthly_stats.completed_tasks }}</span>
+                    <span class="summary-label">Done</span>
+                </div>
+                <div class="summary-stat highlight">
+                    <span class="summary-icon">📈</span>
+                    <span class="summary-value">{{ "%.0f"|format(monthly_stats.completion_rate) }}%</span>
+                    <span class="summary-label">This Month</span>
+                </div>
+            </div>
+
+            <!-- Calendar Header -->
+            <div class="calendar-header">
+                <a href="?year={{ prev_month.year }}&month={{ prev_month.month }}" class="nav-btn">‹</a>
+                <h2 class="month-title">{{ month_name }} {{ year }}</h2>
+                <a href="?year={{ next_month.year }}&month={{ next_month.month }}" class="nav-btn">›</a>
+            </div>
+
+            <!-- Calendar Grid -->
+            <div class="calendar-grid">
+                <div class="weekday-header">Sun</div>
+                <div class="weekday-header">Mon</div>
+                <div class="weekday-header">Tue</div>
+                <div class="weekday-header">Wed</div>
+                <div class="weekday-header">Thu</div>
+                <div class="weekday-header">Fri</div>
+                <div class="weekday-header">Sat</div>
+                
+                {% for cell in calendar_days %}
+                    {% if cell is none %}
+                        <div class="calendar-day empty"></div>
+                    {% else %}
+                        <div class="calendar-day {{ 'today' if cell.is_today else '' }} {{ 'selected' if selected_day and selected_day.id == cell.day.id else '' }}"
+                             data-day-id="{{ cell.day.id }}"
+                             data-date="{{ cell.day.date }}"
+                             onclick="selectDay('{{ cell.day.id }}', '{{ cell.day.date }}')">
+                            <span class="day-number">{{ cell.day_num }}</span>
+                            {% if cell.day.tasks %}
+                                <div class="day-indicators">
+                                    {% for task in cell.day.tasks[:3] %}
+                                        <span class="task-dot {{ task.status.value }}"></span>
+                                    {% endfor %}
+                                    {% if cell.day.tasks|length > 3 %}
+                                        <span class="more-indicator">+{{ cell.day.tasks|length - 3 }}</span>
+                                    {% endif %}
+                                </div>
+                            {% endif %}
+                        </div>
+                    {% endif %}
+                {% endfor %}
+            </div>
+        </main>
+
+        <!-- Right Sidebar - Day Details -->
+        <aside class="sidebar sidebar-right">
+            <div class="day-panel" id="dayPanel">
+                {% if selected_day %}
+                    <div class="panel-header">
+                        <h2 class="panel-date">{{ selected_date }}</h2>
+                        <span class="panel-badge">{{ selected_day.tasks|length }} tasks</span>
+                    </div>
+                    
+                    <div class="task-list" id="taskList">
+                        {% for task in selected_day.tasks %}
+                            <div class="task-item {{ task.status.value }}" data-task-id="{{ task.id }}">
+                                <div class="task-header" onclick="toggleTaskExpand('{{ selected_day.id }}', '{{ task.id }}')">
+                                    <span class="expand-icon">{{ '▼' if task.is_expanded else '▶' }}</span>
+                                    <input type="checkbox" 
+                                           class="task-checkbox"
+                                           {{ 'checked' if task.completed else '' }}
+                                           onclick="event.stopPropagation(); toggleTask('{{ selected_day.id }}', '{{ task.id }}')"
+                                           id="task-{{ task.id }}">
+                                    <label class="task-title" for="task-{{ task.id }}">{{ task.title }}</label>
+                                    <button class="btn-icon delete-btn" onclick="event.stopPropagation(); deleteTask('{{ selected_day.id }}', '{{ task.id }}')" title="Delete task">×</button>
+                                </div>
+                                
+                                <div class="subtask-container {{ 'expanded' if task.is_expanded else 'collapsed' }}">
+                                    {% if task.subtasks %}
+                                        <div class="subtask-progress">
+                                            <div class="progress-bar">
+                                                <div class="progress-fill" style="width: {{ (task.subtasks|selectattr('completed')|list|length / task.subtasks|length * 100) if task.subtasks else 0 }}%"></div>
+                                            </div>
+                                            <span class="progress-text">{{ task.subtasks|selectattr('completed')|list|length }}/{{ task.subtasks|length }}</span>
+                                        </div>
+                                        <ul class="subtask-list">
+                                            {% for subtask in task.subtasks %}
+                                                <li class="subtask-item">
+                                                    <input type="checkbox" 
+                                                           class="subtask-checkbox"
+                                                           {{ 'checked' if subtask.completed else '' }}
+                                                           onclick="toggleSubtask('{{ selected_day.id }}', '{{ task.id }}', '{{ subtask.id }}')"
+                                                           id="subtask-{{ subtask.id }}">
+                                                    <label for="subtask-{{ subtask.id }}">{{ subtask.title }}</label>
+                                                    <button class="btn-icon-sm" onclick="deleteSubtask('{{ selected_day.id }}', '{{ task.id }}', '{{ subtask.id }}')" title="Delete">×</button>
+                                                </li>
+                                            {% endfor %}
+                                        </ul>
+                                    {% endif %}
+                                    
+                                    <div class="add-subtask">
+                                        <input type="text" 
+                                               class="subtask-input" 
+                                               placeholder="Add subtask..."
+                                               id="subtask-input-{{ task.id }}"
+                                               onkeypress="if(event.key==='Enter') addSubtask('{{ selected_day.id }}', '{{ task.id }}')">
+                                        <button class="btn-add-subtask" onclick="addSubtask('{{ selected_day.id }}', '{{ task.id }}')">+</button>
+                                    </div>
+                                </div>
+                            </div>
+                        {% endfor %}
+                    </div>
+                    
+                    <div class="add-task-form">
+                        <input type="text" id="newTaskInput" placeholder="Add new task..." 
+                               onkeypress="if(event.key==='Enter') addPanelTask('{{ selected_day.id }}')">
+                        <button class="btn btn-primary" onclick="addPanelTask('{{ selected_day.id }}')">Add</button>
+                    </div>
+                {% else %}
+                    <div class="empty-panel">
+                        <span class="empty-icon">📆</span>
+                        <p>Select a day to view tasks</p>
+                    </div>
+                {% endif %}
+            </div>
+        </aside>
+    </div>
+
+    <script src="{{ url_for('static', filename='app.js') }}"></script>
+</body>
+</html>
