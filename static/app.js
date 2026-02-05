@@ -181,6 +181,9 @@ document.addEventListener('keydown', (e) => {
 // Initialize on page load
 // ========================================
 
+let currentCollection = null;
+let allCollections = [];
+
 document.addEventListener('DOMContentLoaded', () => {
     // Auto-focus new task input if day panel is visible
     const newTaskInput = document.getElementById('newTaskInput');
@@ -196,4 +199,217 @@ document.addEventListener('DOMContentLoaded', () => {
             if (sidebar) sidebar.classList.add('open');
         }
     }
+    
+    // Load collections when collections tab is active
+    const collectionsTab = document.getElementById('collections-tab');
+    if (collectionsTab && collectionsTab.classList.contains('active')) {
+        loadCollections();
+    }
 });
+
+// ========================================
+// Tab Navigation
+// ========================================
+
+function switchTab(tabName) {
+    // Hide all tabs and deactivate buttons
+    document.querySelectorAll('.tab-content').forEach(tab => {
+        tab.classList.remove('active');
+    });
+    document.querySelectorAll('.tab-btn').forEach(btn => {
+        btn.classList.remove('active');
+    });
+    
+    // Show selected tab and activate button
+    const tab = document.getElementById(`${tabName}-tab`);
+    if (tab) {
+        tab.classList.add('active');
+    }
+    
+    const btn = document.querySelector(`.tab-btn[data-tab="${tabName}"]`);
+    if (btn) {
+        btn.classList.add('active');
+    }
+    
+    // Load collections if switching to collections tab
+    if (tabName === 'collections') {
+        loadCollections();
+    }
+}
+
+// ========================================
+// Collections Management
+// ========================================
+
+async function loadCollections() {
+    try {
+        const response = await fetch('/api/collections');
+        if (!response.ok) throw new Error('Failed to load collections');
+        
+        allCollections = await response.json();
+        renderCollections();
+    } catch (error) {
+        console.error('Error loading collections:', error);
+        const container = document.getElementById('collectionsContainer');
+        if (container) {
+            container.innerHTML = '<div class="loading-message">Error loading collections</div>';
+        }
+    }
+}
+
+function renderCollections() {
+    const container = document.getElementById('collectionsContainer');
+    if (!container) return;
+    
+    if (allCollections.length === 0) {
+        container.innerHTML = `
+            <div class="empty-collections">
+                <p>📚 No collections yet. Create one to get started!</p>
+            </div>
+        `;
+        return;
+    }
+    
+    container.innerHTML = allCollections.map(collection => `
+        <div class="collection-card" onclick="selectCollection('${collection.id}')">
+            <div class="collection-card-header">
+                <h3 class="collection-title">${escapeHtml(collection.name)}</h3>
+                <button class="btn-icon" onclick="event.stopPropagation(); showCollectionMenu('${collection.id}')" title="Options">⋮</button>
+            </div>
+            ${collection.description ? `<div class="collection-description">${escapeHtml(collection.description)}</div>` : ''}
+            <div class="collection-meta">
+                <span class="collection-meta-item">📋 ${collection.tasks.length} tasks</span>
+                <span class="collection-meta-item">✅ ${collection.tasks.filter(t => t.completed).length} done</span>
+            </div>
+            <div class="collection-progress">
+                <div class="progress-bar">
+                    <div class="progress-fill" style="width: ${collection.tasks.length > 0 ? (collection.tasks.filter(t => t.completed).length / collection.tasks.length * 100) : 0}%"></div>
+                </div>
+                <span class="progress-text">${collection.tasks.length > 0 ? Math.round(collection.tasks.filter(t => t.completed).length / collection.tasks.length * 100) : 0}%</span>
+            </div>
+            <div class="collection-tasks expanded">
+                <div class="collection-task-list">
+                    ${collection.tasks.slice(0, 5).map(task => `
+                        <div class="collection-task-item ${task.completed ? 'completed' : ''}">
+                            <input type="checkbox" ${task.completed ? 'checked' : ''} 
+                                   onchange="toggleCollectionTask('${collection.id}', '${task.id}')">
+                            <span class="collection-task-title">${escapeHtml(task.title)}</span>
+                            ${task.priority && task.priority !== 'none' ? `<span class="collection-task-priority ${task.priority}">${task.priority}</span>` : ''}
+                            <button class="btn-icon-sm" onclick="deleteCollectionTask('${collection.id}', '${task.id}')" title="Delete">×</button>
+                        </div>
+                    `).join('')}
+                    ${collection.tasks.length > 5 ? `<div class="loading-message">+${collection.tasks.length - 5} more tasks</div>` : ''}
+                </div>
+                <div class="add-collection-task">
+                    <input type="text" placeholder="Add task..." id="task-input-${collection.id}">
+                    <button onclick="addCollectionTask('${collection.id}')">+</button>
+                </div>
+            </div>
+        </div>
+    `).join('');
+}
+
+function selectCollection(collectionId) {
+    currentCollection = allCollections.find(c => c.id === collectionId);
+    document.querySelectorAll('.collection-card').forEach(card => {
+        card.classList.remove('selected');
+    });
+    event.currentTarget.classList.add('selected');
+}
+
+async function createCollection() {
+    const name = prompt('Collection name:');
+    if (!name) return;
+    
+    const description = prompt('Description (optional):');
+    
+    try {
+        const response = await fetch('/api/collections', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ name, description: description || '' })
+        });
+        
+        if (response.ok) {
+            loadCollections();
+        }
+    } catch (error) {
+        console.error('Error creating collection:', error);
+    }
+}
+
+function showNewCollectionForm() {
+    createCollection();
+}
+
+async function deleteCollectionTask(collectionId, taskId) {
+    if (!confirm('Delete this task?')) return;
+    
+    try {
+        const response = await fetch(`/api/collections/${collectionId}/tasks/${taskId}`, {
+            method: 'DELETE'
+        });
+        
+        if (response.ok) {
+            loadCollections();
+        }
+    } catch (error) {
+        console.error('Error deleting task:', error);
+    }
+}
+
+async function toggleCollectionTask(collectionId, taskId) {
+    try {
+        const response = await fetch(`/api/collections/${collectionId}/tasks/${taskId}/toggle`, {
+            method: 'POST'
+        });
+        
+        if (response.ok) {
+            loadCollections();
+        }
+    } catch (error) {
+        console.error('Error toggling task:', error);
+    }
+}
+
+async function addCollectionTask(collectionId) {
+    const input = document.getElementById(`task-input-${collectionId}`);
+    const title = input.value.trim();
+    
+    if (!title) return;
+    
+    try {
+        const response = await fetch(`/api/collections/${collectionId}/tasks`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ title })
+        });
+        
+        if (response.ok) {
+            input.value = '';
+            loadCollections();
+        }
+    } catch (error) {
+        console.error('Error adding task:', error);
+    }
+}
+
+function showCollectionMenu(collectionId) {
+    const actions = `
+        Edit: Update collection details
+        Delete: Remove collection permanently
+    `;
+    alert('Collection options (in development)');
+}
+
+// Utility function to escape HTML
+function escapeHtml(text) {
+    const map = {
+        '&': '&amp;',
+        '<': '&lt;',
+        '>': '&gt;',
+        '"': '&quot;',
+        "'": '&#039;'
+    };
+    return text.replace(/[&<>"']/g, m => map[m]);
+}

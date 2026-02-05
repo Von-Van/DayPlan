@@ -2,18 +2,39 @@
 DayPlan - A calendar-style day planner with task completion tracking.
 """
 
+import os
+import logging
 from datetime import date
 from flask import Flask, render_template, request, jsonify, Response
+from dotenv import load_dotenv
 
+from config import get_config
 from models import (
     get_display_date, get_short_date, get_day_number, get_weekday_name,
     get_month_year, get_month_weeks, get_month_bounds, is_today, is_past, is_future,
     CompletionStatus
 )
 from storage import storage
+from validation import (
+    ValidationError, handle_validation_error, validate_request_json,
+    validate_string, validate_uuid, validate_priority, validate_color,
+    validate_list_of_strings, log_validation_error
+)
 
+# Load environment variables from .env file
+load_dotenv()
 
 app = Flask(__name__)
+
+# Load configuration based on FLASK_ENV
+app.config.from_object(get_config())
+
+# Setup logging
+logging.basicConfig(
+    level=app.config["LOG_LEVEL"],
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+)
+logger = logging.getLogger(__name__)
 
 
 def _day_metrics(day) -> dict:
@@ -50,6 +71,29 @@ def utility_processor():
         "today": today.isoformat(),
         "today_date": today
     }
+
+
+# ========================================
+# Error Handlers
+# ========================================
+
+@app.errorhandler(400)
+def bad_request(error):
+    """Handle 400 Bad Request errors"""
+    return jsonify({"error": "Bad request"}), 400
+
+
+@app.errorhandler(404)
+def not_found(error):
+    """Handle 404 Not Found errors"""
+    return jsonify({"error": "Resource not found"}), 404
+
+
+@app.errorhandler(500)
+def internal_error(error):
+    """Handle 500 Internal Server errors"""
+    logger.error(f"Internal server error: {error}", exc_info=True)
+    return jsonify({"error": "Internal server error"}), 500
 
 
 @app.route("/")
@@ -320,6 +364,178 @@ def get_statistics():
     return jsonify(stats.to_dict())
 
 
+# ========================
+# Collection Routes
+# ========================
+
+@app.route("/api/collections", methods=["GET"])
+def get_collections():
+    """Get all collections."""
+    collections = storage.get_all_collections()
+    return jsonify([c.to_dict() for c in collections])
+
+
+@app.route("/api/collections", methods=["POST"])
+@validate_request_json
+def create_collection():
+    """Create a new collection."""
+    try:
+        data = request.json
+        
+        # Validate required fields
+        name = validate_string(
+            data.get("name", ""),
+            "name",
+            min_length=1,
+            max_length=200
+        )
+        
+        # Validate optional fields
+        description = validate_string(
+            data.get("description", ""),
+            "description",
+            min_length=0,
+            max_length=500,
+            allow_empty=True
+        )
+        
+        color = validate_color(data.get("color", "blue"))
+        
+        collection = storage.create_collection(name, description, color)
+        logger.info(f"Collection created: {collection.id} - {name}")
+        return jsonify(collection.to_dict()), 201
+    
+    except ValidationError as e:
+        log_validation_error(e, "/api/collections [POST]")
+        return handle_validation_error(e)
+    except Exception as e:
+        logger.error(f"Error creating collection: {e}", exc_info=True)
+        return jsonify({"error": "Internal server error"}), 500
+
+
+@app.route("/api/collections/<collection_id>", methods=["GET"])
+def get_collection(collection_id):
+    """Get a specific collection."""
+    try:
+        validate_uuid(collection_id, "collection_id")
+        collection = storage.get_collection(collection_id)
+        if not collection:
+            return jsonify({"error": "Collection not found"}), 404
+        return jsonify(collection.to_dict())
+    except ValidationError as e:
+        return handle_validation_error(e)
+    except Exception as e:
+        logger.error(f"Error getting collection: {e}", exc_info=True)
+        return jsonify({"error": "Internal server error"}), 500
+
+
+@app.route("/api/collections/<collection_id>", methods=["PUT"])
+@validate_request_json
+def update_collection(collection_id):
+    """Update a collection."""
+    try:
+        validate_uuid(collection_id, "collection_id")
+        data = request.json
+        
+        # Validate optional fields
+        name = None
+        if "name" in data:
+            name = validate_string(data["name"], "name", min_length=1, max_length=200)
+        
+        description = None
+        if "description" in data:
+            description = validate_string(data["description"], "description", max_length=500, allow_empty=True)
+        
+        color = None
+        if "color" in data:
+            color = validate_color(data["color"])
+        
+        collection = storage.update_collection(collection_id, name=name, description=description, color=color)
+        if not collection:
+            return jsonify({"error": "Collection not found"}), 404
+        
+        logger.info(f"Collection updated: {collection_id}")
+        return jsonify(collection.to_dict())
+    
+    except ValidationError as e:
+        log_validation_error(e, f"/api/collections/{collection_id} [PUT]")
+        return handle_validation_error(e)
+    except Exception as e:
+        logger.error(f"Error updating collection: {e}", exc_info=True)
+        return jsonify({"error": "Internal server error"}), 500
+
+
+@app.route("/api/collections/<collection_id>", methods=["DELETE"])
+def delete_collection(collection_id):
+    """Delete a collection."""
+    try:
+        validate_uuid(collection_id, "collection_id")
+        if storage.delete_collection(collection_id):
+            logger.info(f"Collection deleted: {collection_id}")
+            return jsonify({"success": True})
+        return jsonify({"error": "Collection not found"}), 404
+    except ValidationError as e:
+        return handle_validation_error(e)
+    except Exception as e:
+        logger.error(f"Error deleting collection: {e}", exc_info=True)
+        return jsonify({"error": "Internal server error"}), 500
+
+
+@app.route("/api/collections/<collection_id>/tasks", methods=["POST"])
+@validate_request_json
+def add_collection_task(collection_id):
+    """Add a task to a collection."""
+    try:
+        validate_uuid(collection_id, "collection_id")
+        data = request.json
+        
+        title = validate_string(data.get("title", ""), "title", min_length=1, max_length=500)
+        priority = validate_priority(data.get("priority", "none"))
+        tags = validate_list_of_strings(data.get("tags", []), "tags", max_items=10)
+        notes = validate_string(data.get("notes", ""), "notes", max_length=1000, allow_empty=True)
+        
+        task = storage.add_collection_task(collection_id, title, priority, tags, notes)
+        if not task:
+            return jsonify({"error": "Collection not found"}), 404
+        
+        logger.info(f"Task added to collection {collection_id}: {task.id}")
+    return jsonify(task.to_dict()), 201
+
+
+@app.route("/api/collections/<collection_id>/tasks/<task_id>", methods=["PUT"])
+def update_collection_task(collection_id, task_id):
+    """Update a collection task."""
+    data = request.json
+    task = storage.update_collection_task(
+        collection_id,
+        task_id,
+        title=data.get("title"),
+        priority=data.get("priority"),
+        tags=data.get("tags"),
+        notes=data.get("notes")
+    )
+    if not task:
+        return jsonify({"error": "Task or collection not found"}), 404
+    return jsonify(task.to_dict())
+
+
+@app.route("/api/collections/<collection_id>/tasks/<task_id>/toggle", methods=["POST"])
+def toggle_collection_task(collection_id, task_id):
+    """Toggle a collection task's completion status."""
+    task = storage.toggle_collection_task(collection_id, task_id)
+    if not task:
+        return jsonify({"error": "Task or collection not found"}), 404
+    return jsonify(task.to_dict())
+
+
+@app.route("/api/collections/<collection_id>/tasks/<task_id>", methods=["DELETE"])
+def delete_collection_task(collection_id, task_id):
+    """Delete a collection task."""
+    if storage.delete_collection_task(collection_id, task_id):
+        return jsonify({"success": True})
+    return jsonify({"error": "Task or collection not found"}), 404
+
+
 @app.route("/api/export/json")
 @app.route("/export/json")
 def export_json():
@@ -345,4 +561,15 @@ def export_csv():
 
 
 if __name__ == "__main__":
-    app.run(debug=True, port=5000)
+    debug = app.config["DEBUG"]
+    port = int(os.getenv("FLASK_PORT", 5000))
+    host = os.getenv("FLASK_HOST", "127.0.0.1")
+    
+    env_name = os.getenv("FLASK_ENV", "production")
+    print(f"\n{'='*60}")
+    print(f"Starting DayPlan - {env_name.upper()} mode")
+    print(f"Running on {host}:{port}")
+    print(f"Debug: {debug}")
+    print(f"{'='*60}\n")
+    
+    app.run(debug=debug, port=port, host=host)

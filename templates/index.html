@@ -44,41 +44,49 @@
             </div>
         </aside>
 
-        <!-- Main Content - Calendar -->
+        <!-- Main Content -->
         <main class="main-content">
-            <!-- Monthly Summary Bar -->
-            <div class="monthly-summary">
-                <div class="summary-stat">
-                    <span class="summary-icon">📅</span>
-                    <span class="summary-value">{{ monthly_stats.days_with_tasks }}</span>
-                    <span class="summary-label">Active Days</span>
-                </div>
-                <div class="summary-stat">
-                    <span class="summary-icon">📋</span>
-                    <span class="summary-value">{{ monthly_stats.total_tasks }}</span>
-                    <span class="summary-label">Tasks</span>
-                </div>
-                <div class="summary-stat">
-                    <span class="summary-icon">✅</span>
-                    <span class="summary-value">{{ monthly_stats.completed_tasks }}</span>
-                    <span class="summary-label">Done</span>
-                </div>
-                <div class="summary-stat highlight">
-                    <span class="summary-icon">📈</span>
-                    <span class="summary-value">{{ "%.0f"|format(monthly_stats.completion_rate) }}%</span>
-                    <span class="summary-label">This Month</span>
-                </div>
+            <!-- Tab Navigation -->
+            <div class="tab-navigation">
+                <button class="tab-btn active" data-tab="calendar" onclick="switchTab('calendar')">📅 Calendar</button>
+                <button class="tab-btn" data-tab="collections" onclick="switchTab('collections')">📚 Collections</button>
             </div>
 
-            <!-- Calendar Header -->
-            <div class="calendar-header">
-                <a href="?year={{ prev_month.year }}&month={{ prev_month.month }}" class="nav-btn">‹</a>
-                <h2 class="month-title">{{ month_name }} {{ year }}</h2>
-                <a href="?year={{ next_month.year }}&month={{ next_month.month }}" class="nav-btn">›</a>
-            </div>
+            <!-- Calendar Tab -->
+            <div class="tab-content active" id="calendar-tab">
+                <!-- Monthly Summary Bar -->
+                <div class="monthly-summary">
+                    <div class="summary-stat">
+                        <span class="summary-icon">📅</span>
+                        <span class="summary-value">{{ monthly_stats.days_with_tasks }}</span>
+                        <span class="summary-label">Active Days</span>
+                    </div>
+                    <div class="summary-stat">
+                        <span class="summary-icon">📋</span>
+                        <span class="summary-value">{{ monthly_stats.total_tasks }}</span>
+                        <span class="summary-label">Tasks</span>
+                    </div>
+                    <div class="summary-stat">
+                        <span class="summary-icon">✅</span>
+                        <span class="summary-value">{{ monthly_stats.completed_tasks }}</span>
+                        <span class="summary-label">Done</span>
+                    </div>
+                    <div class="summary-stat highlight">
+                        <span class="summary-icon">📈</span>
+                        <span class="summary-value">{{ "%.0f"|format(monthly_stats.completion_rate) }}%</span>
+                        <span class="summary-label">This Month</span>
+                    </div>
+                </div>
 
-            <!-- Calendar Grid -->
-            <div class="calendar-grid">
+                <!-- Calendar Header -->
+                <div class="calendar-header">
+                    <a href="?year={{ prev_month.year }}&month={{ prev_month.month }}" class="nav-btn">‹</a>
+                    <h2 class="month-title">{{ month_name }} {{ year }}</h2>
+                    <a href="?year={{ next_month.year }}&month={{ next_month.month }}" class="nav-btn">›</a>
+                </div>
+
+                <!-- Calendar Grid -->
+                <div class="calendar-grid">
                 <div class="weekday-header">Sun</div>
                 <div class="weekday-header">Mon</div>
                 <div class="weekday-header">Tue</div>
@@ -109,10 +117,26 @@
                         </div>
                     {% endif %}
                 {% endfor %}
+                </div>
             </div>
+            <!-- End Calendar Tab -->
+
+            <!-- Collections Tab -->
+            <div class="tab-content" id="collections-tab">
+                <div class="collections-header">
+                    <h2>Collections</h2>
+                    <button class="btn btn-primary" onclick="showNewCollectionForm()">+ New Collection</button>
+                </div>
+
+                <div class="collections-container" id="collectionsContainer">
+                    <!-- Collections will be loaded here by JavaScript -->
+                    <div class="loading-message">Loading collections...</div>
+                </div>
+            </div>
+            <!-- End Collections Tab -->
         </main>
 
-        <!-- Right Sidebar - Day Details -->
+        <!-- Right Sidebar - Day Details / Collection Details -->
         <aside class="sidebar sidebar-right">
             <div class="day-panel" id="dayPanel">
                 {% if selected_day %}

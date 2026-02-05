@@ -9,7 +9,7 @@ import os
 from io import StringIO
 from datetime import date, datetime
 from typing import Optional
-from models import Day, Statistics, MonthlyStatistics, CompletionStatus, get_month_bounds
+from models import Day, Statistics, MonthlyStatistics, CompletionStatus, get_month_bounds, Collection, CollectionTask
 
 
 DATA_FILE = "dayplan_data.json"
@@ -21,6 +21,7 @@ class Storage:
     def __init__(self, data_file: str = DATA_FILE):
         self.data_file = data_file
         self._days: dict[str, Day] = {}
+        self._collections: dict[str, Collection] = {}
         self._load()
 
     def _load(self) -> None:
@@ -32,14 +33,19 @@ class Storage:
                     for day_data in data.get("days", []):
                         day = Day.from_dict(day_data)
                         self._days[day.id] = day
+                    for collection_data in data.get("collections", []):
+                        collection = Collection.from_dict(collection_data)
+                        self._collections[collection.id] = collection
             except (json.JSONDecodeError, KeyError) as e:
                 print(f"Error loading data: {e}")
                 self._days = {}
+                self._collections = {}
 
     def _save(self) -> None:
         """Save data to JSON file."""
         data = {
             "days": [day.to_dict() for day in self._days.values()],
+            "collections": [collection.to_dict() for collection in self._collections.values()],
             "last_updated": datetime.now().isoformat()
         }
         with open(self.data_file, "w") as f:
@@ -340,6 +346,106 @@ class Storage:
                 ])
         
         return output.getvalue()
+
+    # ========================
+    # Collection Methods
+    # ========================
+
+    def get_all_collections(self) -> list[Collection]:
+        """Get all collections sorted by creation date (newest first)."""
+        return sorted(self._collections.values(), key=lambda c: c.created_at, reverse=True)
+
+    def get_collection(self, collection_id: str) -> Optional[Collection]:
+        """Get a specific collection by ID."""
+        return self._collections.get(collection_id)
+
+    def create_collection(self, name: str, description: str = "", color: str = "blue") -> Collection:
+        """Create a new collection."""
+        collection = Collection.create(name, description, color)
+        self._collections[collection.id] = collection
+        self._save()
+        return collection
+
+    def update_collection(self, collection_id: str, name: Optional[str] = None, description: Optional[str] = None, color: Optional[str] = None) -> Optional[Collection]:
+        """Update a collection's metadata."""
+        collection = self._collections.get(collection_id)
+        if not collection:
+            return None
+        
+        if name is not None:
+            collection.name = name.strip()
+        if description is not None:
+            collection.description = description.strip()
+        if color is not None:
+            collection.color = color
+        
+        self._save()
+        return collection
+
+    def delete_collection(self, collection_id: str) -> bool:
+        """Delete a collection."""
+        if collection_id in self._collections:
+            del self._collections[collection_id]
+            self._save()
+            return True
+        return False
+
+    def add_collection_task(self, collection_id: str, title: str, priority: str = "none", tags: Optional[list[str]] = None, notes: str = "") -> Optional[CollectionTask]:
+        """Add a task to a collection."""
+        collection = self._collections.get(collection_id)
+        if not collection:
+            return None
+        
+        task = collection.add_task(title, priority, tags, notes)
+        self._save()
+        return task
+
+    def update_collection_task(self, collection_id: str, task_id: str, title: Optional[str] = None, priority: Optional[str] = None, tags: Optional[list[str]] = None, notes: Optional[str] = None) -> Optional[CollectionTask]:
+        """Update a task in a collection."""
+        collection = self._collections.get(collection_id)
+        if not collection:
+            return None
+        
+        task = collection.get_task(task_id)
+        if not task:
+            return None
+        
+        if title is not None:
+            task.title = title.strip()
+        if priority is not None:
+            task.priority = priority
+        if tags is not None:
+            task.tags = tags
+        if notes is not None:
+            task.notes = notes
+        
+        self._save()
+        return task
+
+    def toggle_collection_task(self, collection_id: str, task_id: str) -> Optional[CollectionTask]:
+        """Toggle completion status of a collection task."""
+        collection = self._collections.get(collection_id)
+        if not collection:
+            return None
+        
+        task = collection.get_task(task_id)
+        if not task:
+            return None
+        
+        task.toggle()
+        self._save()
+        return task
+
+    def delete_collection_task(self, collection_id: str, task_id: str) -> bool:
+        """Delete a task from a collection."""
+        collection = self._collections.get(collection_id)
+        if not collection:
+            return False
+        
+        if collection.remove_task(task_id):
+            self._save()
+            return True
+        return False
 
 
 # Global storage instance

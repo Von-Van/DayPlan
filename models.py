@@ -410,3 +410,147 @@ def get_month_weeks(year: int, month: int) -> list[list[Optional[date_type]]]:
         weeks.append(current_week)
     
     return weeks
+
+
+@dataclass
+class CollectionTask:
+    """Represents a task within a collection (not tied to a specific date)."""
+    id: str
+    title: str
+    completed: bool = False
+    created_at: str = field(default_factory=lambda: datetime.now().isoformat())
+    completed_at: Optional[str] = None
+    priority: str = "none"  # none, low, medium, high
+    tags: list[str] = field(default_factory=list)
+    notes: str = ""
+    
+    @classmethod
+    def create(cls, title: str, priority: str = "none", tags: Optional[list[str]] = None, notes: str = "") -> "CollectionTask":
+        """Factory method to create a new collection task."""
+        return cls(
+            id=str(uuid.uuid4()),
+            title=title.strip(),
+            completed=False,
+            created_at=datetime.now().isoformat(),
+            priority=priority,
+            tags=tags or [],
+            notes=notes
+        )
+    
+    def toggle(self) -> None:
+        """Toggle the completion status of the task."""
+        self.completed = not self.completed
+        self.completed_at = datetime.now().isoformat() if self.completed else None
+    
+    def to_dict(self) -> dict:
+        """Convert to dictionary for JSON serialization."""
+        return {
+            "id": self.id,
+            "title": self.title,
+            "completed": self.completed,
+            "created_at": self.created_at,
+            "completed_at": self.completed_at,
+            "priority": self.priority,
+            "tags": self.tags,
+            "notes": self.notes
+        }
+    
+    @classmethod
+    def from_dict(cls, data: dict) -> "CollectionTask":
+        """Create from dictionary."""
+        return cls(
+            id=data["id"],
+            title=data["title"],
+            completed=data.get("completed", False),
+            created_at=data.get("created_at", datetime.now().isoformat()),
+            completed_at=data.get("completed_at"),
+            priority=data.get("priority", "none"),
+            tags=data.get("tags", []),
+            notes=data.get("notes", "")
+        )
+
+
+@dataclass
+class Collection:
+    """Represents a collection of tasks organized by topic/project (not tied to dates)."""
+    id: str
+    name: str
+    description: str = ""
+    created_at: str = field(default_factory=lambda: datetime.now().isoformat())
+    color: str = "blue"  # visual identifier
+    tasks: list[CollectionTask] = field(default_factory=list)
+    
+    @classmethod
+    def create(cls, name: str, description: str = "", color: str = "blue") -> "Collection":
+        """Factory method to create a new collection."""
+        return cls(
+            id=str(uuid.uuid4()),
+            name=name.strip(),
+            description=description.strip(),
+            created_at=datetime.now().isoformat(),
+            color=color,
+            tasks=[]
+        )
+    
+    def add_task(self, title: str, priority: str = "none", tags: Optional[list[str]] = None, notes: str = "") -> CollectionTask:
+        """Add a task to this collection."""
+        task = CollectionTask.create(title, priority, tags, notes)
+        self.tasks.append(task)
+        return task
+    
+    def get_task(self, task_id: str) -> Optional[CollectionTask]:
+        """Find a task by ID."""
+        for task in self.tasks:
+            if task.id == task_id:
+                return task
+        return None
+    
+    def remove_task(self, task_id: str) -> bool:
+        """Remove a task by ID."""
+        for i, task in enumerate(self.tasks):
+            if task.id == task_id:
+                self.tasks.pop(i)
+                return True
+        return False
+    
+    @property
+    def completion_percentage(self) -> int:
+        """Calculate completion percentage."""
+        if not self.tasks:
+            return 0
+        completed = sum(1 for t in self.tasks if t.completed)
+        return int((completed / len(self.tasks)) * 100)
+    
+    @property
+    def completed_count(self) -> int:
+        """Get number of completed tasks."""
+        return sum(1 for t in self.tasks if t.completed)
+    
+    @property
+    def total_count(self) -> int:
+        """Get total number of tasks."""
+        return len(self.tasks)
+    
+    def to_dict(self) -> dict:
+        """Convert to dictionary for JSON serialization."""
+        return {
+            "id": self.id,
+            "name": self.name,
+            "description": self.description,
+            "created_at": self.created_at,
+            "color": self.color,
+            "tasks": [t.to_dict() for t in self.tasks]
+        }
+    
+    @classmethod
+    def from_dict(cls, data: dict) -> "Collection":
+        """Create from dictionary."""
+        tasks = [CollectionTask.from_dict(t) for t in data.get("tasks", [])]
+        return cls(
+            id=data["id"],
+            name=data["name"],
+            description=data.get("description", ""),
+            created_at=data.get("created_at", datetime.now().isoformat()),
+            color=data.get("color", "blue"),
+            tasks=tasks
+        )

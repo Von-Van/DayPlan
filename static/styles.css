@@ -761,3 +761,278 @@ body {
         height: 6px;
     }
 }
+
+/* ========================================
+   Tab Navigation & Collections
+   ======================================== */
+
+.tab-navigation {
+    display: flex;
+    gap: var(--spacing-md);
+    border-bottom: 2px solid var(--border-color);
+    padding: 0 var(--spacing-md);
+    margin-bottom: var(--spacing-lg);
+}
+
+.tab-btn {
+    padding: var(--spacing-md) var(--spacing-lg);
+    background: none;
+    border: none;
+    color: var(--text-secondary);
+    font-size: 1rem;
+    cursor: pointer;
+    border-bottom: 3px solid transparent;
+    transition: all var(--transition-fast);
+    margin-bottom: -2px;
+}
+
+.tab-btn:hover {
+    color: var(--text-primary);
+}
+
+.tab-btn.active {
+    color: var(--accent-primary);
+    border-bottom-color: var(--accent-primary);
+}
+
+.tab-content {
+    display: none;
+    animation: fadeIn var(--transition-normal);
+}
+
+.tab-content.active {
+    display: block;
+}
+
+@keyframes fadeIn {
+    from {
+        opacity: 0;
+    }
+    to {
+        opacity: 1;
+    }
+}
+
+.collections-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: var(--spacing-lg);
+    padding: 0 var(--spacing-md);
+}
+
+.collections-header h2 {
+    margin: 0;
+    font-size: 1.5rem;
+    color: var(--text-primary);
+}
+
+.collections-container {
+    display: grid;
+    gap: var(--spacing-md);
+    padding: 0 var(--spacing-md) var(--spacing-lg);
+}
+
+.collection-card {
+    background: var(--bg-secondary);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-lg);
+    padding: var(--spacing-md);
+    cursor: pointer;
+    transition: all var(--transition-normal);
+}
+
+.collection-card:hover {
+    background: var(--bg-tertiary);
+    border-color: var(--accent-primary);
+    transform: translateY(-2px);
+}
+
+.collection-card.selected {
+    background: var(--bg-tertiary);
+    border-color: var(--accent-primary);
+}
+
+.collection-card-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: start;
+    margin-bottom: var(--spacing-sm);
+}
+
+.collection-title {
+    font-size: 1.1rem;
+    font-weight: 600;
+    color: var(--text-primary);
+    margin: 0;
+}
+
+.collection-meta {
+    display: flex;
+    gap: var(--spacing-md);
+    font-size: 0.85rem;
+    color: var(--text-secondary);
+}
+
+.collection-meta-item {
+    display: flex;
+    align-items: center;
+    gap: var(--spacing-xs);
+}
+
+.collection-description {
+    font-size: 0.9rem;
+    color: var(--text-secondary);
+    margin: var(--spacing-sm) 0;
+    line-height: 1.4;
+}
+
+.collection-progress {
+    display: flex;
+    align-items: center;
+    gap: var(--spacing-sm);
+    margin-top: var(--spacing-sm);
+}
+
+.progress-bar {
+    flex: 1;
+    height: 6px;
+    background: var(--bg-tertiary);
+    border-radius: 3px;
+    overflow: hidden;
+}
+
+.progress-fill {
+    height: 100%;
+    background: var(--accent-success);
+    transition: width var(--transition-normal);
+}
+
+.progress-text {
+    font-size: 0.8rem;
+    color: var(--text-secondary);
+    white-space: nowrap;
+}
+
+.collection-tasks {
+    margin-top: var(--spacing-md);
+    display: none;
+}
+
+.collection-tasks.expanded {
+    display: block;
+}
+
+.collection-task-list {
+    display: flex;
+    flex-direction: column;
+    gap: var(--spacing-sm);
+    margin-bottom: var(--spacing-md);
+}
+
+.collection-task-item {
+    display: flex;
+    align-items: center;
+    gap: var(--spacing-sm);
+    padding: var(--spacing-sm);
+    background: var(--bg-tertiary);
+    border-radius: var(--radius-md);
+    transition: all var(--transition-fast);
+}
+
+.collection-task-item:hover {
+    background: var(--bg-hover);
+}
+
+.collection-task-item.completed .collection-task-title {
+    text-decoration: line-through;
+    color: var(--text-secondary);
+}
+
+.collection-task-item input[type="checkbox"] {
+    width: 18px;
+    height: 18px;
+    cursor: pointer;
+}
+
+.collection-task-title {
+    flex: 1;
+    color: var(--text-primary);
+    word-break: break-word;
+}
+
+.collection-task-priority {
+    font-size: 0.75rem;
+    padding: 2px 6px;
+    border-radius: 3px;
+    background: var(--bg-secondary);
+    color: var(--text-secondary);
+}
+
+.collection-task-priority.high {
+    background: rgba(248, 81, 73, 0.2);
+    color: #f85149;
+}
+
+.collection-task-priority.medium {
+    background: rgba(210, 153, 34, 0.2);
+    color: #d29922;
+}
+
+.collection-task-priority.low {
+    background: rgba(63, 185, 80, 0.2);
+    color: #3fb950;
+}
+
+.add-collection-task {
+    display: flex;
+    gap: var(--spacing-sm);
+    margin-top: var(--spacing-sm);
+}
+
+.add-collection-task input {
+    flex: 1;
+    padding: var(--spacing-sm) var(--spacing-md);
+    background: var(--bg-tertiary);
+    border: 1px solid var(--border-color);
+    color: var(--text-primary);
+    border-radius: var(--radius-md);
+    font-size: 0.9rem;
+}
+
+.add-collection-task input::placeholder {
+    color: var(--text-muted);
+}
+
+.add-collection-task button {
+    padding: var(--spacing-sm) var(--spacing-md);
+    background: var(--accent-primary);
+    color: #fff;
+    border: none;
+    border-radius: var(--radius-md);
+    cursor: pointer;
+    font-weight: 600;
+    transition: all var(--transition-fast);
+}
+
+.add-collection-task button:hover {
+    background: #79c0ff;
+    transform: scale(1.05);
+}
+
+.loading-message {
+    text-align: center;
+    color: var(--text-secondary);
+    padding: var(--spacing-xl);
+}
+
+.empty-collections {
+    text-align: center;
+    padding: var(--spacing-xl);
+    color: var(--text-secondary);
+}
+
+.empty-collections p {
+    margin: 0;
+    font-size: 1rem;
+}

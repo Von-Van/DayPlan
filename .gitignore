@@ -1,6 +1,11 @@
 # DayPlan data file
 dayplan_data.json
 
+# Planning & documentation (internal, not for git)
+docs/SECURITY_PLAN.md
+docs/UX_PLAN.md
+docs/DEPLOYMENT_PLAN.md
+
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]
