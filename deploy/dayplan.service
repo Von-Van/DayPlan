@@ -1,0 +1,59 @@
+# DayPlan - Systemd Service File
+#
+# Install:
+#   sudo cp deploy/dayplan.service /etc/systemd/system/dayplan.service
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable dayplan
+#   sudo systemctl start dayplan
+#
+# Management:
+#   sudo systemctl status dayplan
+#   sudo systemctl restart dayplan
+#   sudo systemctl stop dayplan
+#   sudo journalctl -u dayplan -f
+
+[Unit]
+Description=DayPlan Calendar Planner
+Documentation=https://github.com/jakemauldin/DayPlan
+After=network.target
+
+[Service]
+# ---- User & Group ----
+# Change to your user if not using www-data
+User=jakemauldin
+Group=staff
+
+# ---- Working Directory ----
+WorkingDirectory=/Users/jakemauldin/Documents/GitHub/DayPlan
+
+# ---- Environment ----
+EnvironmentFile=/Users/jakemauldin/Documents/GitHub/DayPlan/.env
+Environment="PATH=/Users/jakemauldin/Documents/GitHub/DayPlan/.venv/bin:/usr/local/bin:/usr/bin:/bin"
+
+# ---- Startup ----
+ExecStart=/Users/jakemauldin/Documents/GitHub/DayPlan/startup.sh
+
+# ---- Restart Policy ----
+Restart=always
+RestartSec=10
+
+# ---- Logging ----
+StandardOutput=append:/Users/jakemauldin/Documents/GitHub/DayPlan/logs/systemd.log
+StandardError=append:/Users/jakemauldin/Documents/GitHub/DayPlan/logs/systemd-error.log
+
+# ---- Security ----
+PrivateTmp=true
+NoNewPrivileges=true
+
+# ---- Resource Limits ----
+LimitNOFILE=65536
+LimitNPROC=4096
+
+# ---- Process Management ----
+Type=exec
+KillMode=mixed
+KillSignal=SIGTERM
+TimeoutStopSec=30
+
+[Install]
+WantedBy=multi-user.target

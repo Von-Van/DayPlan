@@ -4,7 +4,8 @@ DayPlan - A calendar-style day planner with task completion tracking.
 
 import os
 import logging
-from datetime import date
+import logging.handlers
+from datetime import date, datetime
 from flask import Flask, render_template, request, jsonify, Response
 from flask_wtf.csrf import CSRFProtect
 from dotenv import load_dotenv
@@ -39,14 +40,41 @@ if app.config.get('ENV') == 'production':
             "Generate one with: python -c \"import secrets; print(secrets.token_hex(32))\""
         )
 
+# Application version
+APP_VERSION = "1.0.0"
+
 # Initialize CSRF protection
 csrf = CSRFProtect(app)
 
 # Setup logging
-logging.basicConfig(
-    level=app.config["LOG_LEVEL"],
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
-)
+log_level = getattr(logging, app.config.get("LOG_LEVEL", "INFO").upper(), logging.INFO)
+log_format = '%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+log_formatter = logging.Formatter(log_format)
+
+# Console handler (always active)
+console_handler = logging.StreamHandler()
+console_handler.setFormatter(log_formatter)
+console_handler.setLevel(log_level)
+
+# File handler (if LOG_FILE is configured)
+log_file = app.config.get("LOG_FILE")
+if log_file:
+    log_dir = os.path.dirname(log_file)
+    if log_dir:
+        os.makedirs(log_dir, exist_ok=True)
+    file_handler = logging.handlers.RotatingFileHandler(
+        log_file,
+        maxBytes=10 * 1024 * 1024,  # 10 MB
+        backupCount=5,
+        encoding='utf-8'
+    )
+    file_handler.setFormatter(log_formatter)
+    file_handler.setLevel(log_level)
+    logging.root.addHandler(file_handler)
+
+logging.root.addHandler(console_handler)
+logging.root.setLevel(log_level)
+
 logger = logging.getLogger(__name__)
 
 
@@ -717,6 +745,43 @@ def export_csv():
         mimetype="text/csv",
         headers={"Content-Disposition": "attachment;filename=dayplan_export.csv"}
     )
+
+
+# ========================================
+# Health Check & Monitoring
+# ========================================
+
+@app.route("/health", methods=["GET"])
+def health_check():
+    """Health check endpoint for monitoring and load balancers."""
+    try:
+        # Check if data file is accessible
+        data_file = storage.data_file
+        if not os.path.exists(data_file):
+            return jsonify({
+                "status": "degraded",
+                "reason": "Data file not found (will be created on first write)",
+                "version": APP_VERSION,
+                "timestamp": datetime.now().isoformat()
+            }), 200
+
+        # Verify data can be loaded
+        storage.get_all_days()
+
+        return jsonify({
+            "status": "healthy",
+            "version": APP_VERSION,
+            "timestamp": datetime.now().isoformat()
+        }), 200
+
+    except Exception as e:
+        logger.error(f"Health check failed: {e}", exc_info=True)
+        return jsonify({
+            "status": "error",
+            "reason": str(e),
+            "version": APP_VERSION,
+            "timestamp": datetime.now().isoformat()
+        }), 500
 
 
 if __name__ == "__main__":

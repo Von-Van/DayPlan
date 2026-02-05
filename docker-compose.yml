@@ -1,0 +1,78 @@
+# ========================================
+# DayPlan - Docker Compose
+# ========================================
+# Full production stack with Nginx reverse proxy.
+#
+# Usage:
+#   docker compose up -d          # Start all services
+#   docker compose down           # Stop all services
+#   docker compose logs -f app    # Follow app logs
+#   docker compose ps             # Check status
+
+services:
+  # -------------------------------------------
+  # DayPlan Application (Gunicorn)
+  # -------------------------------------------
+  app:
+    build: .
+    container_name: dayplan-app
+    restart: unless-stopped
+    environment:
+      - FLASK_ENV=production
+      - FLASK_DEBUG=False
+      - SECRET_KEY=${SECRET_KEY:-please-change-this-secret-key}
+      - DATA_FILE_PATH=/app/data/dayplan_data.json
+      - LOG_FILE=/app/logs/dayplan.log
+      - GUNICORN_BIND=0.0.0.0:8000
+      - GUNICORN_WORKERS=2
+    volumes:
+      - dayplan_data:/app/data
+      - dayplan_logs:/app/logs
+      - dayplan_backups:/app/backups
+    expose:
+      - "8000"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 5s
+    networks:
+      - dayplan-net
+
+  # -------------------------------------------
+  # Nginx Reverse Proxy
+  # -------------------------------------------
+  nginx:
+    image: nginx:alpine
+    container_name: dayplan-nginx
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./deploy/nginx-docker.conf:/etc/nginx/conf.d/default.conf:ro
+      - ./static:/var/www/dayplan/static:ro
+      - nginx_ssl:/etc/nginx/ssl
+      - nginx_logs:/var/log/nginx
+    depends_on:
+      app:
+        condition: service_healthy
+    networks:
+      - dayplan-net
+
+volumes:
+  dayplan_data:
+    name: dayplan_data
+  dayplan_logs:
+    name: dayplan_logs
+  dayplan_backups:
+    name: dayplan_backups
+  nginx_ssl:
+    name: dayplan_nginx_ssl
+  nginx_logs:
+    name: dayplan_nginx_logs
+
+networks:
+  dayplan-net:
+    name: dayplan-net

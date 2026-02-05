@@ -1,0 +1,58 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  DayPlan - macOS LaunchAgent (launchd)
+  
+  Since macOS doesn't use systemd, use this launchd plist instead.
+  
+  Install:
+    cp deploy/com.dayplan.app.plist ~/Library/LaunchAgents/
+    launchctl load ~/Library/LaunchAgents/com.dayplan.app.plist
+  
+  Management:
+    launchctl start com.dayplan.app     # Start
+    launchctl stop com.dayplan.app      # Stop
+    launchctl unload ~/Library/LaunchAgents/com.dayplan.app.plist  # Disable
+    launchctl list | grep dayplan       # Check status
+-->
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.dayplan.app</string>
+    
+    <key>ProgramArguments</key>
+    <array>
+        <string>/Users/jakemauldin/Documents/GitHub/DayPlan/startup.sh</string>
+    </array>
+    
+    <key>WorkingDirectory</key>
+    <string>/Users/jakemauldin/Documents/GitHub/DayPlan</string>
+    
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>PATH</key>
+        <string>/Users/jakemauldin/Documents/GitHub/DayPlan/.venv/bin:/usr/local/bin:/usr/bin:/bin</string>
+    </dict>
+    
+    <!-- Start on load (login) -->
+    <key>RunAtLoad</key>
+    <true/>
+    
+    <!-- Auto-restart on crash -->
+    <key>KeepAlive</key>
+    <dict>
+        <key>SuccessfulExit</key>
+        <false/>
+    </dict>
+    
+    <!-- Restart throttle (seconds) -->
+    <key>ThrottleInterval</key>
+    <integer>10</integer>
+    
+    <!-- Logging -->
+    <key>StandardOutPath</key>
+    <string>/Users/jakemauldin/Documents/GitHub/DayPlan/logs/launchd-stdout.log</string>
+    <key>StandardErrorPath</key>
+    <string>/Users/jakemauldin/Documents/GitHub/DayPlan/logs/launchd-stderr.log</string>
+</dict>
+</plist>

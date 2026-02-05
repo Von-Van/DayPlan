@@ -1,0 +1,39 @@
+# DayPlan - Health Monitor Systemd Service
+#
+# Install:
+#   sudo cp deploy/dayplan-monitor.service /etc/systemd/system/dayplan-monitor.service
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable dayplan-monitor
+#   sudo systemctl start dayplan-monitor
+
+[Unit]
+Description=DayPlan Health Monitor
+Documentation=https://github.com/jakemauldin/DayPlan
+After=dayplan.service
+Requires=dayplan.service
+
+[Service]
+# ---- User & Group ----
+User=jakemauldin
+Group=staff
+
+# ---- Working Directory ----
+WorkingDirectory=/Users/jakemauldin/Documents/GitHub/DayPlan
+
+# ---- Environment ----
+EnvironmentFile=/Users/jakemauldin/Documents/GitHub/DayPlan/.env
+
+# ---- Startup ----
+ExecStart=/Users/jakemauldin/Documents/GitHub/DayPlan/monitor.sh
+
+# ---- Restart Policy ----
+Restart=always
+RestartSec=10
+
+# ---- Process Management ----
+Type=simple
+KillMode=mixed
+KillSignal=SIGTERM
+
+[Install]
+WantedBy=multi-user.target

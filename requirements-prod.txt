@@ -1,0 +1,10 @@
+# DayPlan - Production Requirements
+# Install with: pip install -r requirements-prod.txt
+
+# Core dependencies
+flask>=3.0.0
+python-dotenv>=1.0.0
+Flask-WTF>=1.2.0
+
+# Production WSGI server
+gunicorn>=21.2.0

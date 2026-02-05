@@ -6,6 +6,17 @@ docs/SECURITY_PLAN.md
 docs/UX_PLAN.md
 docs/DEPLOYMENT_PLAN.md
 
+# Logs and backups
+logs/
+backups/
+*.log
+
+# SSL certificates
+ssl/
+*.crt
+*.key
+*.pem
+
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]
