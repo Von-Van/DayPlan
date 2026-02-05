@@ -6,6 +6,7 @@ import os
 import logging
 from datetime import date
 from flask import Flask, render_template, request, jsonify, Response
+from flask_wtf.csrf import CSRFProtect
 from dotenv import load_dotenv
 
 from config import get_config
@@ -28,6 +29,18 @@ app = Flask(__name__)
 
 # Load configuration based on FLASK_ENV
 app.config.from_object(get_config())
+
+# Validate production configuration
+if app.config.get('ENV') == 'production':
+    secret_key = app.config.get('SECRET_KEY')
+    if not secret_key or secret_key == 'dev-key-change-in-production':
+        raise ValueError(
+            "CRITICAL: SECRET_KEY must be set in production! "
+            "Generate one with: python -c \"import secrets; print(secrets.token_hex(32))\""
+        )
+
+# Initialize CSRF protection
+csrf = CSRFProtect(app)
 
 # Setup logging
 logging.basicConfig(
@@ -94,6 +107,24 @@ def internal_error(error):
     """Handle 500 Internal Server errors"""
     logger.error(f"Internal server error: {error}", exc_info=True)
     return jsonify({"error": "Internal server error"}), 500
+
+
+@app.after_request
+def set_security_headers(response):
+    """Add security headers to all responses."""
+    # Prevent MIME type sniffing
+    response.headers['X-Content-Type-Options'] = 'nosniff'
+    # Prevent clickjacking
+    response.headers['X-Frame-Options'] = 'SAMEORIGIN'
+    # Enable browser XSS protection
+    response.headers['X-XSS-Protection'] = '1; mode=block'
+    # Content Security Policy
+    response.headers['Content-Security-Policy'] = "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'"
+    # HTTPS only (for production)
+    if app.config.get('ENV') == 'production':
+        response.headers['Strict-Transport-Security'] = 'max-age=31536000; includeSubDomains'
+    
+    return response
 
 
 @app.route("/")
@@ -208,153 +239,227 @@ def add_day():
 @app.route("/api/days/<day_id>", methods=["GET"])
 def get_day(day_id: str):
     """Get a day's details."""
-    day = storage.get_day(day_id)
-    if day:
-        return jsonify({
-            "success": True,
-            "day": day.to_dict(),
-            "completion_status": day.completion_status.value,
-            "completion_percentage": day.completion_percentage,
-            "completed_count": day.completed_count,
-            "total_count": day.total_count,
-            "display_date": get_display_date(day.date)
-        })
-    return jsonify({"success": False, "error": "Day not found"}), 404
+    try:
+        validate_uuid(day_id, "day_id")
+        day = storage.get_day(day_id)
+        if day:
+            return jsonify({
+                "success": True,
+                "day": day.to_dict(),
+                "completion_status": day.completion_status.value,
+                "completion_percentage": day.completion_percentage,
+                "completed_count": day.completed_count,
+                "total_count": day.total_count,
+                "display_date": get_display_date(day.date)
+            })
+        return jsonify({"success": False, "error": "Day not found"}), 404
+    except ValidationError as e:
+        return handle_validation_error(e)
 
 
 @app.route("/api/days/<day_id>", methods=["DELETE"])
 def delete_day(day_id: str):
     """Delete a day."""
-    if storage.delete_day(day_id):
-        return jsonify({"success": True})
-    return jsonify({"success": False, "error": "Day not found"}), 404
+    try:
+        validate_uuid(day_id, "day_id")
+        if storage.delete_day(day_id):
+            logger.info(f"Day deleted: {day_id}")
+            return jsonify({"success": True})
+        return jsonify({"success": False, "error": "Day not found"}), 404
+    except ValidationError as e:
+        return handle_validation_error(e)
 
 
 @app.route("/api/days/<day_id>/tasks", methods=["POST"])
+@validate_request_json
 def add_task(day_id: str):
     """Add a task to a day."""
-    data = request.get_json(silent=True) or {}
-    title = data.get("title", "").strip()
-    
-    if not title:
-        return jsonify({"success": False, "error": "Title required"}), 400
-    
-    task = storage.add_task(day_id, title)
-    if task:
-        day = storage.get_day(day_id)
-        return jsonify({
-            "success": True, 
-            "task": task,
-            **_day_metrics(day)
-        })
-    
-    return jsonify({"success": False, "error": "Day not found"}), 404
+    try:
+        validate_uuid(day_id, "day_id")
+        data = request.json
+        title = validate_string(data.get("title", ""), "title", min_length=1, max_length=500)
+        
+        task = storage.add_task(day_id, title)
+        if task:
+            day = storage.get_day(day_id)
+            logger.info(f"Task added to day {day_id}: {task}")
+            return jsonify({
+                "success": True, 
+                "task": task,
+                **_day_metrics(day)
+            })
+        
+        return jsonify({"success": False, "error": "Day not found"}), 404
+    except ValidationError as e:
+        log_validation_error(e, f"/api/days/{day_id}/tasks [POST]")
+        return handle_validation_error(e)
+    except Exception as e:
+        logger.error(f"Error adding task: {e}", exc_info=True)
+        return jsonify({"success": False, "error": "Internal server error"}), 500
 
 
 @app.route("/api/days/<day_id>/tasks/<task_id>/toggle", methods=["POST"])
 def toggle_task(day_id: str, task_id: str):
     """Toggle a task's completion status."""
-    if storage.toggle_task(day_id, task_id):
-        day = storage.get_day(day_id)
-        task = day.get_task(task_id) if day else None
-        stats = storage.get_statistics()
-        return jsonify({
-            "success": True,
-            "completed": task.completed if task else False,
-            **_day_metrics(day),
-            "stats": stats.to_dict()
-        })
-    return jsonify({"success": False, "error": "Task not found"}), 404
+    try:
+        validate_uuid(day_id, "day_id")
+        validate_uuid(task_id, "task_id")
+        
+        if storage.toggle_task(day_id, task_id):
+            day = storage.get_day(day_id)
+            task = day.get_task(task_id) if day else None
+            stats = storage.get_statistics()
+            logger.info(f"Task toggled: {task_id} in day {day_id}")
+            return jsonify({
+                "success": True,
+                "completed": task.completed if task else False,
+                **_day_metrics(day),
+                "stats": stats.to_dict()
+            })
+        return jsonify({"success": False, "error": "Task not found"}), 404
+    except ValidationError as e:
+        return handle_validation_error(e)
 
 
 @app.route("/api/days/<day_id>/tasks/<task_id>", methods=["DELETE"])
 def delete_task(day_id: str, task_id: str):
     """Delete a task."""
-    if storage.delete_task(day_id, task_id):
-        day = storage.get_day(day_id)
-        return jsonify({
-            "success": True,
-            **_day_metrics(day)
-        })
-    return jsonify({"success": False, "error": "Task not found"}), 404
+    try:
+        validate_uuid(day_id, "day_id")
+        validate_uuid(task_id, "task_id")
+        
+        if storage.delete_task(day_id, task_id):
+            day = storage.get_day(day_id)
+            logger.info(f"Task deleted: {task_id} from day {day_id}")
+            return jsonify({
+                "success": True,
+                **_day_metrics(day)
+            })
+        return jsonify({"success": False, "error": "Task not found"}), 404
+    except ValidationError as e:
+        return handle_validation_error(e)
 
 
 @app.route("/api/days/<day_id>/tasks/<task_id>", methods=["PUT"])
+@validate_request_json
 def edit_task(day_id: str, task_id: str):
     """Edit a task's title."""
-    data = request.get_json(silent=True) or {}
-    title = data.get("title", "").strip()
-    
-    if not title:
-        return jsonify({"success": False, "error": "Title required"}), 400
-    
-    if storage.edit_task(day_id, task_id, title):
-        return jsonify({"success": True})
-    
-    return jsonify({"success": False, "error": "Task not found"}), 404
+    try:
+        validate_uuid(day_id, "day_id")
+        validate_uuid(task_id, "task_id")
+        data = request.json
+        
+        title = validate_string(data.get("title", ""), "title", min_length=1, max_length=500)
+        
+        if storage.edit_task(day_id, task_id, title):
+            logger.info(f"Task edited: {task_id} in day {day_id}")
+            return jsonify({"success": True})
+        
+        return jsonify({"success": False, "error": "Task not found"}), 404
+    except ValidationError as e:
+        log_validation_error(e, f"/api/days/{day_id}/tasks/{task_id} [PUT]")
+        return handle_validation_error(e)
+    except Exception as e:
+        logger.error(f"Error editing task: {e}", exc_info=True)
+        return jsonify({"success": False, "error": "Internal server error"}), 500
 
 
 @app.route("/api/days/<day_id>/tasks/<task_id>/expand", methods=["POST"])
 def toggle_task_expand(day_id: str, task_id: str):
     """Toggle a task's expanded state."""
-    if storage.toggle_task_expand(day_id, task_id):
-        day = storage.get_day(day_id)
-        task = day.get_task(task_id) if day else None
-        return jsonify({
-            "success": True,
-            "is_expanded": task.is_expanded if task else False
-        })
-    return jsonify({"success": False, "error": "Task not found"}), 404
+    try:
+        validate_uuid(day_id, "day_id")
+        validate_uuid(task_id, "task_id")
+        
+        if storage.toggle_task_expand(day_id, task_id):
+            day = storage.get_day(day_id)
+            task = day.get_task(task_id) if day else None
+            logger.info(f"Task expand toggled: {task_id} in day {day_id}")
+            return jsonify({
+                "success": True,
+                "is_expanded": task.is_expanded if task else False
+            })
+        return jsonify({"success": False, "error": "Task not found"}), 404
+    except ValidationError as e:
+        return handle_validation_error(e)
 
 
 @app.route("/api/days/<day_id>/tasks/<task_id>/subtasks", methods=["POST"])
+@validate_request_json
 def add_subtask(day_id: str, task_id: str):
     """Add a subtask to a task."""
-    data = request.get_json(silent=True) or {}
-    title = data.get("title", "").strip()
-    
-    if not title:
-        return jsonify({"success": False, "error": "Title required"}), 400
-    
-    subtask = storage.add_subtask(day_id, task_id, title)
-    if subtask:
-        day = storage.get_day(day_id)
-        task = day.get_task(task_id) if day else None
-        return jsonify({
-            "success": True,
-            "subtask": subtask,
-            "subtask_progress": task.subtask_progress if task else (0, 0)
-        })
-    
-    return jsonify({"success": False, "error": "Task not found"}), 404
+    try:
+        validate_uuid(day_id, "day_id")
+        validate_uuid(task_id, "task_id")
+        data = request.json
+        
+        title = validate_string(data.get("title", ""), "title", min_length=1, max_length=500)
+        
+        subtask = storage.add_subtask(day_id, task_id, title)
+        if subtask:
+            day = storage.get_day(day_id)
+            task = day.get_task(task_id) if day else None
+            logger.info(f"Subtask added: {subtask} to task {task_id}")
+            return jsonify({
+                "success": True,
+                "subtask": subtask,
+                "subtask_progress": task.subtask_progress if task else (0, 0)
+            })
+        
+        return jsonify({"success": False, "error": "Task not found"}), 404
+    except ValidationError as e:
+        log_validation_error(e, f"/api/days/{day_id}/tasks/{task_id}/subtasks [POST]")
+        return handle_validation_error(e)
+    except Exception as e:
+        logger.error(f"Error adding subtask: {e}", exc_info=True)
+        return jsonify({"success": False, "error": "Internal server error"}), 500
 
 
 @app.route("/api/days/<day_id>/tasks/<task_id>/subtasks/<subtask_id>/toggle", methods=["POST"])
 def toggle_subtask(day_id: str, task_id: str, subtask_id: str):
     """Toggle a subtask's completion status."""
-    if storage.toggle_subtask(day_id, task_id, subtask_id):
-        day = storage.get_day(day_id)
-        task = day.get_task(task_id) if day else None
-        subtask = task.get_subtask(subtask_id) if task else None
-        return jsonify({
-            "success": True,
-            "completed": subtask.completed if subtask else False,
-            "subtask_progress": task.subtask_progress if task else (0, 0)
-        })
-    return jsonify({"success": False, "error": "Subtask not found"}), 404
+    try:
+        validate_uuid(day_id, "day_id")
+        validate_uuid(task_id, "task_id")
+        validate_uuid(subtask_id, "subtask_id")
+        
+        if storage.toggle_subtask(day_id, task_id, subtask_id):
+            day = storage.get_day(day_id)
+            task = day.get_task(task_id) if day else None
+            subtask = task.get_subtask(subtask_id) if task else None
+            logger.info(f"Subtask toggled: {subtask_id} in task {task_id}")
+            return jsonify({
+                "success": True,
+                "completed": subtask.completed if subtask else False,
+                "subtask_progress": task.subtask_progress if task else (0, 0)
+            })
+        return jsonify({"success": False, "error": "Subtask not found"}), 404
+    except ValidationError as e:
+        return handle_validation_error(e)
 
 
 @app.route("/api/days/<day_id>/tasks/<task_id>/subtasks/<subtask_id>", methods=["DELETE"])
 def delete_subtask(day_id: str, task_id: str, subtask_id: str):
     """Delete a subtask."""
-    if storage.delete_subtask(day_id, task_id, subtask_id):
-        day = storage.get_day(day_id)
-        task = day.get_task(task_id) if day else None
-        return jsonify({
-            "success": True,
-            "subtask_progress": task.subtask_progress if task else (0, 0)
-        })
-    return jsonify({"success": False, "error": "Subtask not found"}), 404
+    try:
+        validate_uuid(day_id, "day_id")
+        validate_uuid(task_id, "task_id")
+        validate_uuid(subtask_id, "subtask_id")
+        
+        if storage.delete_subtask(day_id, task_id, subtask_id):
+            day = storage.get_day(day_id)
+            task = day.get_task(task_id) if day else None
+            logger.info(f"Subtask deleted: {subtask_id} from task {task_id}")
+            return jsonify({
+                "success": True,
+                "subtask_progress": task.subtask_progress if task else (0, 0)
+            })
+        return jsonify({"success": False, "error": "Subtask not found"}), 404
+    except ValidationError as e:
+        return handle_validation_error(e)
+    except Exception as e:
+        logger.error(f"Error deleting subtask: {e}", exc_info=True)
+        return jsonify({"success": False, "error": "Internal server error"}), 500
 
 
 @app.route("/api/statistics")
@@ -499,41 +604,95 @@ def add_collection_task(collection_id):
             return jsonify({"error": "Collection not found"}), 404
         
         logger.info(f"Task added to collection {collection_id}: {task.id}")
-    return jsonify(task.to_dict()), 201
+        return jsonify(task.to_dict()), 201
+    
+    except ValidationError as e:
+        log_validation_error(e, f"/api/collections/{collection_id}/tasks [POST]")
+        return handle_validation_error(e)
+    except Exception as e:
+        logger.error(f"Error adding task to collection: {e}", exc_info=True)
+        return jsonify({"error": "Internal server error"}), 500
 
 
 @app.route("/api/collections/<collection_id>/tasks/<task_id>", methods=["PUT"])
+@validate_request_json
 def update_collection_task(collection_id, task_id):
     """Update a collection task."""
-    data = request.json
-    task = storage.update_collection_task(
-        collection_id,
-        task_id,
-        title=data.get("title"),
-        priority=data.get("priority"),
-        tags=data.get("tags"),
-        notes=data.get("notes")
-    )
-    if not task:
-        return jsonify({"error": "Task or collection not found"}), 404
-    return jsonify(task.to_dict())
+    try:
+        validate_uuid(collection_id, "collection_id")
+        validate_uuid(task_id, "task_id")
+        data = request.json
+        
+        # Validate optional fields
+        title = None
+        if "title" in data:
+            title = validate_string(data["title"], "title", min_length=1, max_length=500)
+        
+        priority = None
+        if "priority" in data:
+            priority = validate_priority(data["priority"])
+        
+        tags = None
+        if "tags" in data:
+            tags = validate_list_of_strings(data["tags"], "tags", max_items=10)
+        
+        notes = None
+        if "notes" in data:
+            notes = validate_string(data["notes"], "notes", max_length=1000, allow_empty=True)
+        
+        task = storage.update_collection_task(collection_id, task_id, title=title, priority=priority, tags=tags, notes=notes)
+        if not task:
+            return jsonify({"error": "Task or collection not found"}), 404
+        
+        logger.info(f"Task updated: {task_id} in collection {collection_id}")
+        return jsonify(task.to_dict())
+    
+    except ValidationError as e:
+        log_validation_error(e, f"/api/collections/{collection_id}/tasks/{task_id} [PUT]")
+        return handle_validation_error(e)
+    except Exception as e:
+        logger.error(f"Error updating collection task: {e}", exc_info=True)
+        return jsonify({"error": "Internal server error"}), 500
 
 
 @app.route("/api/collections/<collection_id>/tasks/<task_id>/toggle", methods=["POST"])
 def toggle_collection_task(collection_id, task_id):
     """Toggle a collection task's completion status."""
-    task = storage.toggle_collection_task(collection_id, task_id)
-    if not task:
-        return jsonify({"error": "Task or collection not found"}), 404
-    return jsonify(task.to_dict())
+    try:
+        validate_uuid(collection_id, "collection_id")
+        validate_uuid(task_id, "task_id")
+        
+        task = storage.toggle_collection_task(collection_id, task_id)
+        if not task:
+            return jsonify({"error": "Task or collection not found"}), 404
+        
+        logger.info(f"Task toggled: {task_id} in collection {collection_id}")
+        return jsonify(task.to_dict())
+    
+    except ValidationError as e:
+        return handle_validation_error(e)
+    except Exception as e:
+        logger.error(f"Error toggling collection task: {e}", exc_info=True)
+        return jsonify({"error": "Internal server error"}), 500
 
 
 @app.route("/api/collections/<collection_id>/tasks/<task_id>", methods=["DELETE"])
 def delete_collection_task(collection_id, task_id):
     """Delete a collection task."""
-    if storage.delete_collection_task(collection_id, task_id):
-        return jsonify({"success": True})
-    return jsonify({"error": "Task or collection not found"}), 404
+    try:
+        validate_uuid(collection_id, "collection_id")
+        validate_uuid(task_id, "task_id")
+        
+        if storage.delete_collection_task(collection_id, task_id):
+            logger.info(f"Task deleted: {task_id} from collection {collection_id}")
+            return jsonify({"success": True})
+        return jsonify({"error": "Task or collection not found"}), 404
+    
+    except ValidationError as e:
+        return handle_validation_error(e)
+    except Exception as e:
+        logger.error(f"Error deleting collection task: {e}", exc_info=True)
+        return jsonify({"error": "Internal server error"}), 500
 
 
 @app.route("/api/export/json")

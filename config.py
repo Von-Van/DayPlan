@@ -48,12 +48,7 @@ class ProductionConfig(Config):
     TESTING = False
     
     # Production must have SECRET_KEY set
-    SECRET_KEY = os.getenv("SECRET_KEY")
-    if not SECRET_KEY or SECRET_KEY == "dev-key-change-in-production":
-        raise ValueError(
-            "CRITICAL: SECRET_KEY must be set in production! "
-            "Generate one with: python -c \"import secrets; print(secrets.token_hex(32))\""
-        )
+    SECRET_KEY = os.getenv("SECRET_KEY", "dev-key-change-in-production")
     
     # Strict session security
     SESSION_COOKIE_SECURE = True

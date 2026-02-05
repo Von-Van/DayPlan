@@ -3,6 +3,24 @@
 // ========================================
 
 /**
+ * Get CSRF token from the meta tag
+ */
+function getCSRFToken() {
+    return document.querySelector('meta[name="csrf-token"]').getAttribute('content');
+}
+
+/**
+ * Create fetch headers with CSRF token for state-changing requests
+ */
+function getAuthHeaders(includeCSRF = true) {
+    const headers = { 'Content-Type': 'application/json' };
+    if (includeCSRF) {
+        headers['X-CSRFToken'] = getCSRFToken();
+    }
+    return headers;
+}
+
+/**
  * Select a day and reload with the day panel showing
  */
 function selectDay(dayId, date) {
@@ -23,7 +41,7 @@ async function addPanelTask(dayId) {
     try {
         const response = await fetch(`/api/days/${dayId}/tasks`, {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            headers: getAuthHeaders(),
             body: JSON.stringify({ title })
         });
         
@@ -41,7 +59,8 @@ async function addPanelTask(dayId) {
 async function toggleTask(dayId, taskId) {
     try {
         const response = await fetch(`/api/days/${dayId}/tasks/${taskId}/toggle`, {
-            method: 'POST'
+            method: 'POST',
+            headers: getAuthHeaders()
         });
         
         if (response.ok) {
@@ -60,7 +79,8 @@ async function deleteTask(dayId, taskId) {
     
     try {
         const response = await fetch(`/api/days/${dayId}/tasks/${taskId}`, {
-            method: 'DELETE'
+            method: 'DELETE',
+            headers: getAuthHeaders()
         });
         
         if (response.ok) {
@@ -77,7 +97,8 @@ async function deleteTask(dayId, taskId) {
 async function toggleTaskExpand(dayId, taskId) {
     try {
         const response = await fetch(`/api/days/${dayId}/tasks/${taskId}/expand`, {
-            method: 'POST'
+            method: 'POST',
+            headers: getAuthHeaders()
         });
         
         if (response.ok) {
@@ -100,7 +121,7 @@ async function addSubtask(dayId, taskId) {
     try {
         const response = await fetch(`/api/days/${dayId}/tasks/${taskId}/subtasks`, {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            headers: getAuthHeaders(),
             body: JSON.stringify({ title })
         });
         
@@ -118,7 +139,8 @@ async function addSubtask(dayId, taskId) {
 async function toggleSubtask(dayId, taskId, subtaskId) {
     try {
         const response = await fetch(`/api/days/${dayId}/tasks/${taskId}/subtasks/${subtaskId}/toggle`, {
-            method: 'POST'
+            method: 'POST',
+            headers: getAuthHeaders()
         });
         
         if (response.ok) {
@@ -135,7 +157,8 @@ async function toggleSubtask(dayId, taskId, subtaskId) {
 async function deleteSubtask(dayId, taskId, subtaskId) {
     try {
         const response = await fetch(`/api/days/${dayId}/tasks/${taskId}/subtasks/${subtaskId}`, {
-            method: 'DELETE'
+            method: 'DELETE',
+            headers: getAuthHeaders()
         });
         
         if (response.ok) {
@@ -347,7 +370,8 @@ async function deleteCollectionTask(collectionId, taskId) {
     
     try {
         const response = await fetch(`/api/collections/${collectionId}/tasks/${taskId}`, {
-            method: 'DELETE'
+            method: 'DELETE',
+            headers: getAuthHeaders()
         });
         
         if (response.ok) {
@@ -361,7 +385,8 @@ async function deleteCollectionTask(collectionId, taskId) {
 async function toggleCollectionTask(collectionId, taskId) {
     try {
         const response = await fetch(`/api/collections/${collectionId}/tasks/${taskId}/toggle`, {
-            method: 'POST'
+            method: 'POST',
+            headers: getAuthHeaders()
         });
         
         if (response.ok) {
@@ -381,7 +406,7 @@ async function addCollectionTask(collectionId) {
     try {
         const response = await fetch(`/api/collections/${collectionId}/tasks`, {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            headers: getAuthHeaders(),
             body: JSON.stringify({ title })
         });
         
