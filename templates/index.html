@@ -11,9 +11,10 @@
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
 </head>
 <body>
+    <a href="#main-content" class="skip-link">Skip to main content</a>
     <div class="app-container">
         <!-- Left Sidebar - Statistics -->
-        <aside class="sidebar sidebar-left">
+        <aside class="sidebar sidebar-left" role="complementary" aria-label="Statistics and exports">
             <div class="sidebar-header">
                 <h1 class="logo">📅 DayPlan</h1>
             </div>
@@ -46,15 +47,15 @@
         </aside>
 
         <!-- Main Content -->
-        <main class="main-content">
+        <main class="main-content" id="main-content">
             <!-- Tab Navigation -->
-            <div class="tab-navigation">
-                <button class="tab-btn active" data-tab="calendar" onclick="switchTab('calendar')">📅 Calendar</button>
-                <button class="tab-btn" data-tab="collections" onclick="switchTab('collections')">📚 Collections</button>
+            <div class="tab-navigation" role="tablist" aria-label="Main navigation">
+                <button class="tab-btn active" data-tab="calendar" onclick="switchTab('calendar')" role="tab" aria-selected="true" aria-controls="calendar-tab" id="tab-calendar">📅 Calendar</button>
+                <button class="tab-btn" data-tab="collections" onclick="switchTab('collections')" role="tab" aria-selected="false" aria-controls="collections-tab" id="tab-collections">📚 Collections</button>
             </div>
 
             <!-- Calendar Tab -->
-            <div class="tab-content active" id="calendar-tab">
+            <div class="tab-content active" id="calendar-tab" role="tabpanel" aria-labelledby="tab-calendar">
                 <!-- Monthly Summary Bar -->
                 <div class="monthly-summary">
                     <div class="summary-stat">
@@ -81,34 +82,38 @@
 
                 <!-- Calendar Header -->
                 <div class="calendar-header">
-                    <a href="?year={{ prev_month.year }}&month={{ prev_month.month }}" class="nav-btn">‹</a>
-                    <h2 class="month-title">{{ month_name }} {{ year }}</h2>
-                    <a href="?year={{ next_month.year }}&month={{ next_month.month }}" class="nav-btn">›</a>
+                    <a href="?year={{ prev_month.year }}&month={{ prev_month.month }}" class="nav-btn" aria-label="Previous month">‹</a>
+                    <h2 class="month-title" aria-live="polite">{{ month_name }} {{ year }}</h2>
+                    <a href="?year={{ next_month.year }}&month={{ next_month.month }}" class="nav-btn" aria-label="Next month">›</a>
                 </div>
 
                 <!-- Calendar Grid -->
-                <div class="calendar-grid">
-                <div class="weekday-header">Sun</div>
-                <div class="weekday-header">Mon</div>
-                <div class="weekday-header">Tue</div>
-                <div class="weekday-header">Wed</div>
-                <div class="weekday-header">Thu</div>
-                <div class="weekday-header">Fri</div>
-                <div class="weekday-header">Sat</div>
+                <div class="calendar-grid" role="grid" aria-label="Calendar for {{ month_name }} {{ year }}">
+                <div class="weekday-header" role="columnheader">Sun</div>
+                <div class="weekday-header" role="columnheader">Mon</div>
+                <div class="weekday-header" role="columnheader">Tue</div>
+                <div class="weekday-header" role="columnheader">Wed</div>
+                <div class="weekday-header" role="columnheader">Thu</div>
+                <div class="weekday-header" role="columnheader">Fri</div>
+                <div class="weekday-header" role="columnheader">Sat</div>
                 
                 {% for cell in calendar_days %}
                     {% if cell is none %}
-                        <div class="calendar-day empty"></div>
+                        <div class="calendar-day empty" role="gridcell" aria-hidden="true"></div>
                     {% else %}
                         <div class="calendar-day {{ 'today' if cell.is_today else '' }} {{ 'selected' if selected_day and selected_day.id == cell.day.id else '' }}"
+                             role="gridcell"
+                             tabindex="0"
                              data-day-id="{{ cell.day.id }}"
                              data-date="{{ cell.day.date }}"
-                             onclick="selectDay('{{ cell.day.id }}', '{{ cell.day.date }}')">
+                             onclick="selectDay('{{ cell.day.id }}', '{{ cell.day.date }}')"
+                             onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();selectDay('{{ cell.day.id }}', '{{ cell.day.date }}')}"
+                             aria-label="{{ cell.day.date }}{% if cell.is_today %} (today){% endif %}, {{ cell.day.tasks|length }} task{{ 's' if cell.day.tasks|length != 1 else '' }}">
                             <span class="day-number">{{ cell.day_num }}</span>
                             {% if cell.day.tasks %}
-                                <div class="day-indicators">
+                                <div class="day-indicators" aria-hidden="true">
                                     {% for task in cell.day.tasks[:3] %}
-                                        <span class="task-dot {{ task.status.value }}"></span>
+                                        <span class="task-dot {{ task.status.value }}" title="{{ task.title }}: {{ task.status.value }}"></span>
                                     {% endfor %}
                                     {% if cell.day.tasks|length > 3 %}
                                         <span class="more-indicator">+{{ cell.day.tasks|length - 3 }}</span>
@@ -123,13 +128,13 @@
             <!-- End Calendar Tab -->
 
             <!-- Collections Tab -->
-            <div class="tab-content" id="collections-tab">
+            <div class="tab-content" id="collections-tab" role="tabpanel" aria-labelledby="tab-collections">
                 <div class="collections-header">
                     <h2>Collections</h2>
                     <button class="btn btn-primary" onclick="showNewCollectionForm()">+ New Collection</button>
                 </div>
 
-                <div class="collections-container" id="collectionsContainer">
+                <div class="collections-container" id="collectionsContainer" aria-live="polite">
                     <!-- Collections will be loaded here by JavaScript -->
                     <div class="loading-message">Loading collections...</div>
                 </div>
@@ -138,7 +143,7 @@
         </main>
 
         <!-- Right Sidebar - Day Details / Collection Details -->
-        <aside class="sidebar sidebar-right">
+        <aside class="sidebar sidebar-right" role="complementary" aria-label="Day details">
             <div class="day-panel" id="dayPanel">
                 {% if selected_day %}
                     <div class="panel-header">
@@ -146,27 +151,32 @@
                         <span class="panel-badge">{{ selected_day.tasks|length }} tasks</span>
                     </div>
                     
-                    <div class="task-list" id="taskList">
+                    <div class="task-list" id="taskList" aria-live="polite" aria-label="Task list">
                         {% for task in selected_day.tasks %}
-                            <div class="task-item {{ task.status.value }}" data-task-id="{{ task.id }}">
-                                <div class="task-header" onclick="toggleTaskExpand('{{ selected_day.id }}', '{{ task.id }}')">
-                                    <span class="expand-icon">{{ '▼' if task.is_expanded else '▶' }}</span>
+                            <div class="task-item {{ task.status.value }}" data-task-id="{{ task.id }}" role="article" aria-label="Task: {{ task.title }}">
+                                <div class="task-header" onclick="toggleTaskExpand('{{ selected_day.id }}', '{{ task.id }}')" aria-expanded="{{ 'true' if task.is_expanded else 'false' }}">
+                                    <span class="expand-icon" aria-hidden="true">{{ '▼' if task.is_expanded else '▶' }}</span>
                                     <input type="checkbox" 
                                            class="task-checkbox"
                                            {{ 'checked' if task.completed else '' }}
                                            onclick="event.stopPropagation(); toggleTask('{{ selected_day.id }}', '{{ task.id }}')"
-                                           id="task-{{ task.id }}">
-                                    <label class="task-title" for="task-{{ task.id }}">{{ task.title }}</label>
-                                    <button class="btn-icon delete-btn" onclick="event.stopPropagation(); deleteTask('{{ selected_day.id }}', '{{ task.id }}')" title="Delete task">×</button>
+                                           id="task-{{ task.id }}"
+                                           aria-label="Mark '{{ task.title }}' as {{ 'incomplete' if task.completed else 'complete' }}">
+                                    <label class="task-title" for="task-{{ task.id }}" data-editable="true" onclick="event.stopPropagation(); enableTaskEdit(event, '{{ selected_day.id }}', '{{ task.id }}')">{{ task.title }}</label>
+                                    <button class="btn-icon delete-btn" onclick="event.stopPropagation(); deleteTask('{{ selected_day.id }}', '{{ task.id }}')" title="Delete task" aria-label="Delete task '{{ task.title }}'">×</button>
                                 </div>
                                 
                                 <div class="subtask-container {{ 'expanded' if task.is_expanded else 'collapsed' }}">
                                     {% if task.subtasks %}
-                                        <div class="subtask-progress">
-                                            <div class="progress-bar">
+                                        <div class="subtask-progress" role="group" aria-label="Subtask progress">
+                                            <div class="progress-bar" role="progressbar" 
+                                                 aria-valuenow="{{ task.subtasks|selectattr('completed')|list|length }}" 
+                                                 aria-valuemin="0" 
+                                                 aria-valuemax="{{ task.subtasks|length }}"
+                                                 aria-label="{{ task.subtasks|selectattr('completed')|list|length }} of {{ task.subtasks|length }} subtasks completed">
                                                 <div class="progress-fill" style="width: {{ (task.subtasks|selectattr('completed')|list|length / task.subtasks|length * 100) if task.subtasks else 0 }}%"></div>
                                             </div>
-                                            <span class="progress-text">{{ task.subtasks|selectattr('completed')|list|length }}/{{ task.subtasks|length }}</span>
+                                            <span class="progress-text">{{ task.subtasks|selectattr('completed')|list|length }} of {{ task.subtasks|length }}</span>
                                         </div>
                                         <ul class="subtask-list">
                                             {% for subtask in task.subtasks %}
@@ -175,9 +185,10 @@
                                                            class="subtask-checkbox"
                                                            {{ 'checked' if subtask.completed else '' }}
                                                            onclick="toggleSubtask('{{ selected_day.id }}', '{{ task.id }}', '{{ subtask.id }}')"
-                                                           id="subtask-{{ subtask.id }}">
+                                                           id="subtask-{{ subtask.id }}"
+                                                           aria-label="Mark '{{ subtask.title }}' as {{ 'incomplete' if subtask.completed else 'complete' }}">
                                                     <label for="subtask-{{ subtask.id }}">{{ subtask.title }}</label>
-                                                    <button class="btn-icon-sm" onclick="deleteSubtask('{{ selected_day.id }}', '{{ task.id }}', '{{ subtask.id }}')" title="Delete">×</button>
+                                                    <button class="btn-icon-sm" onclick="deleteSubtask('{{ selected_day.id }}', '{{ task.id }}', '{{ subtask.id }}')" title="Delete subtask" aria-label="Delete subtask '{{ subtask.title }}'">×</button>
                                                 </li>
                                             {% endfor %}
                                         </ul>
@@ -188,8 +199,9 @@
                                                class="subtask-input" 
                                                placeholder="Add subtask..."
                                                id="subtask-input-{{ task.id }}"
+                                               aria-label="Add subtask to '{{ task.title }}'"
                                                onkeypress="if(event.key==='Enter') addSubtask('{{ selected_day.id }}', '{{ task.id }}')">
-                                        <button class="btn-add-subtask" onclick="addSubtask('{{ selected_day.id }}', '{{ task.id }}')">+</button>
+                                        <button class="btn-add-subtask" onclick="addSubtask('{{ selected_day.id }}', '{{ task.id }}')" aria-label="Add subtask">+</button>
                                     </div>
                                 </div>
                             </div>
@@ -198,8 +210,9 @@
                     
                     <div class="add-task-form">
                         <input type="text" id="newTaskInput" placeholder="Add new task..." 
+                               aria-label="New task title"
                                onkeypress="if(event.key==='Enter') addPanelTask('{{ selected_day.id }}')">
-                        <button class="btn btn-primary" onclick="addPanelTask('{{ selected_day.id }}')">Add</button>
+                        <button class="btn btn-primary" id="addTaskBtn" onclick="addPanelTask('{{ selected_day.id }}')" aria-label="Add new task">Add</button>
                     </div>
                 {% else %}
                     <div class="empty-panel">
@@ -209,6 +222,61 @@
                 {% endif %}
             </div>
         </aside>
+    </div>
+
+    <!-- ========================================
+         Modals
+         ======================================== -->
+
+    <!-- Modal backdrop -->
+    <div id="modalBackdrop" class="modal-backdrop" onclick="closeActiveModal()"></div>
+
+    <!-- Collection creation modal -->
+    <div id="collectionModal" class="modal" role="dialog" aria-labelledby="collectionModalTitle" aria-modal="true">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2 id="collectionModalTitle">New Collection</h2>
+                <button class="modal-close" onclick="closeModal('collectionModal')" aria-label="Close modal">×</button>
+            </div>
+            
+            <form id="collectionForm" onsubmit="handleCollectionFormSubmit(event)">
+                <div class="form-group">
+                    <label for="collectionName">Collection Name *</label>
+                    <input type="text" id="collectionName" name="name" required 
+                           placeholder="e.g., Shopping, Projects, Ideas"
+                           minlength="1" maxlength="200">
+                    <span class="error-message" id="nameError"></span>
+                </div>
+                
+                <div class="form-group">
+                    <label for="collectionDescription">Description</label>
+                    <textarea id="collectionDescription" name="description" 
+                              placeholder="What is this collection for?"
+                              maxlength="500" rows="3"></textarea>
+                    <span class="error-message" id="descriptionError"></span>
+                </div>
+                
+                <div class="modal-actions">
+                    <button type="button" class="btn" onclick="closeModal('collectionModal')">Cancel</button>
+                    <button type="submit" class="btn btn-primary">Create Collection</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- Confirmation dialog modal -->
+    <div id="confirmModal" class="modal" role="alertdialog" aria-labelledby="confirmTitle" aria-describedby="confirmMessage" aria-modal="true">
+        <div class="modal-content modal-content-sm">
+            <div class="modal-header">
+                <h2 id="confirmTitle">Confirm</h2>
+                <button class="modal-close" onclick="closeModal('confirmModal')" aria-label="Close">×</button>
+            </div>
+            <p id="confirmMessage" class="confirm-message">Are you sure?</p>
+            <div class="modal-actions">
+                <button type="button" class="btn" onclick="closeModal('confirmModal')" id="confirmCancelBtn">Cancel</button>
+                <button type="button" class="btn btn-danger" id="confirmOkBtn">Delete</button>
+            </div>
+        </div>
     </div>
 
     <script src="{{ url_for('static', filename='app.js') }}"></script>
