@@ -11,5 +11,7 @@ Thanks for your interest. This repository is a **portfolio preview** and intenti
 
 ## Development
 
-- Python 3.11+
-- Run locally with `python app.py`
+- Xcode 15 or newer
+- iOS 17 or newer
+- Open `DayPlan.xcodeproj` and run the `DayPlan` scheme
+- Run tests with `xcodebuild -project DayPlan.xcodeproj -scheme DayPlan -destination 'platform=iOS Simulator,name=iPhone 17' test`

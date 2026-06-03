@@ -16,6 +16,6 @@ labels: bug
 ## Actual
 
 ## Environment
-- OS:
-- Browser (if applicable):
-- Python version:
+- iOS version:
+- Device or simulator:
+- Xcode version:
