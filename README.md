@@ -16,6 +16,22 @@ The previous Flask desktop prototype is preserved on the
 - Yesterday: local content digest fed by explicit source adapters.
 - Settings: notification permission, source toggles, and future data tools.
 
+## Checklist Widget
+
+DayPlan includes an interactive checklist widget for the iPhone Lock Screen and
+Home Screen. Opening today's checklist publishes a minimal snapshot containing
+task titles, completion state, and reminder identifiers to a private App Group.
+The widget never receives notes, collections, Yesterday content, or the main
+SwiftData store.
+
+Checking an item in the widget updates the widget immediately and stores a
+bounded mutation queue. DayPlan reconciles those changes into completion history
+when the app next becomes active. iOS requires authentication before interactive
+Lock Screen widget actions run on a locked device.
+
+Both the `DayPlan` and `DayPlanWidget` targets must use the
+`group.com.jakemauldin.DayPlan` App Group in Signing & Capabilities.
+
 ## Yesterday Sources
 
 Add RSS or Atom feeds from Settings to fill Yesterday with real content. Each
@@ -28,6 +44,14 @@ source can be enabled independently and configured with:
 Refreshing Yesterday fetches every enabled source, applies its filters, and
 rebuilds the deterministic local summary. A failing source does not block the
 others.
+
+## Suggested Items
+
+When viewing today in By Day, DayPlan deterministically selects one
+high-priority follow-up from locally stored Yesterday content. Accepting adds a
+non-persistent, reminder-free checklist item with source context; dismissing
+permanently excludes that source event. Decisions and scoring remain on-device,
+and no content is sent to a cloud AI service.
 
 ## Notification Scope
 

@@ -19,7 +19,7 @@ enum CollectionPriority: String, Codable, CaseIterable, Identifiable {
     }
 }
 
-enum ContentCategory: String, Codable, CaseIterable, Identifiable {
+enum ContentCategory: String, Codable, CaseIterable, Identifiable, Equatable {
     case alert
     case message
     case calendar
@@ -53,6 +53,11 @@ enum ContentSourceKind: String, Codable, CaseIterable, Identifiable {
         case .rss: "RSS / Atom"
         }
     }
+}
+
+enum ContentSuggestionStatus: String, Codable, Equatable {
+    case accepted
+    case dismissed
 }
 
 @Model
@@ -446,5 +451,37 @@ final class DailyContentDigest: Identifiable {
         self.date = date
         self.summary = summary
         self.generatedAt = generatedAt
+    }
+}
+
+@Model
+final class ContentSuggestionDecision: Identifiable {
+    @Attribute(.unique) var id: UUID
+    @Attribute(.unique) var eventKey: String
+    var statusRawValue: String
+    var decidedAt: Date
+    var checklistItemID: UUID?
+
+    init(
+        id: UUID = UUID(),
+        eventKey: String,
+        status: ContentSuggestionStatus,
+        decidedAt: Date = .now,
+        checklistItemID: UUID? = nil
+    ) {
+        self.id = id
+        self.eventKey = eventKey
+        self.statusRawValue = status.rawValue
+        self.decidedAt = decidedAt
+        self.checklistItemID = checklistItemID
+    }
+
+    var status: ContentSuggestionStatus {
+        get { ContentSuggestionStatus(rawValue: statusRawValue) ?? .dismissed }
+        set { statusRawValue = newValue.rawValue }
+    }
+
+    static func eventKey(sourceIdentifier: String, externalID: String) -> String {
+        "v1|\(sourceIdentifier.utf8.count):\(sourceIdentifier)|\(externalID)"
     }
 }

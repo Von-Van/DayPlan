@@ -18,6 +18,8 @@ enum ChecklistStore {
         if let existing = try context.fetch(descriptor).first {
             if createIfMissing {
                 try materializeTemplateItems(into: existing, in: context)
+                try context.save()
+                WidgetChecklistSync.publish(existing)
             }
             return existing
         }
@@ -28,6 +30,7 @@ enum ChecklistStore {
         context.insert(checklist)
         try materializeTemplateItems(into: checklist, in: context)
         try context.save()
+        WidgetChecklistSync.publish(checklist)
         return checklist
     }
 
@@ -37,6 +40,18 @@ enum ChecklistStore {
         to checklist: DailyChecklist,
         in context: ModelContext
     ) throws -> DailyChecklistItem {
+        let item = insertItem(title: title, notes: notes, to: checklist, in: context)
+        try context.save()
+        WidgetChecklistSync.publish(checklist)
+        return item
+    }
+
+    static func insertItem(
+        title: String,
+        notes: String = "",
+        to checklist: DailyChecklist,
+        in context: ModelContext
+    ) -> DailyChecklistItem {
         let item = DailyChecklistItem(
             title: title.trimmingCharacters(in: .whitespacesAndNewlines),
             notes: notes,
@@ -46,7 +61,6 @@ enum ChecklistStore {
         checklist.items.append(item)
         checklist.updatedAt = .now
         context.insert(item)
-        try context.save()
         return item
     }
 
@@ -55,12 +69,16 @@ enum ChecklistStore {
         isCompleted: Bool? = nil,
         in context: ModelContext
     ) throws {
+        let checklist = item.checklist
         let nextValue = isCompleted ?? !item.isCompleted
         item.isCompleted = nextValue
         item.completedAt = nextValue ? .now : nil
         item.updatedAt = .now
         item.checklist?.updatedAt = .now
         try context.save()
+        if let checklist {
+            WidgetChecklistSync.publish(checklist)
+        }
     }
 
     static func updateItem(
@@ -86,6 +104,9 @@ enum ChecklistStore {
         }
 
         try context.save()
+        if let checklist = item.checklist {
+            WidgetChecklistSync.publish(checklist)
+        }
     }
 
     static func setPersistence(
@@ -123,15 +144,22 @@ enum ChecklistStore {
         item.updatedAt = .now
         item.checklist?.updatedAt = .now
         try context.save()
+        if let checklist = item.checklist {
+            WidgetChecklistSync.publish(checklist)
+        }
     }
 
     static func deleteItem(
         _ item: DailyChecklistItem,
         in context: ModelContext
     ) throws {
-        item.checklist?.updatedAt = .now
+        let checklist = item.checklist
+        checklist?.updatedAt = .now
         context.delete(item)
         try context.save()
+        if let checklist {
+            WidgetChecklistSync.publish(checklist)
+        }
     }
 
     static func activeTemplates(in context: ModelContext) throws -> [ChecklistTemplateItem] {

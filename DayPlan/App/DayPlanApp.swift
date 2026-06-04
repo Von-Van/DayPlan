@@ -6,11 +6,11 @@ struct DayPlanApp: App {
     private let modelContainer: ModelContainer?
 
     init() {
-        let schema = Schema(DayPlanSchema.models)
-        let configuration = ModelConfiguration(schema: schema, isStoredInMemoryOnly: false)
-
         do {
-            modelContainer = try ModelContainer(for: schema, configurations: [configuration])
+            let container = try ModelContainerFactory.privateOnDevice()
+            let context = ModelContext(container)
+            try? WidgetChecklistSync.applyPendingMutations(in: context)
+            modelContainer = container
         } catch {
             modelContainer = nil
         }

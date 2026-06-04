@@ -9,6 +9,10 @@ struct ByDayView: View {
     @State private var newItemTitle = ""
     @State private var editingItem: DailyChecklistItem?
     @State private var errorMessage: String?
+    @State private var suggestedItem: SuggestedChecklistItem?
+    @State private var didLoadSuggestion = false
+    @State private var isLoadingSuggestion = false
+    @State private var isProcessingSuggestion = false
 
     private let reminderScheduler: ReminderManaging = UserNotificationReminderScheduler()
 
@@ -33,6 +37,29 @@ struct ByDayView: View {
                 }
             } header: {
                 Text(DisplayFormatters.dayTitle.string(from: selectedDate))
+            }
+
+            if ContentSuggestionService.supportsSuggestions(for: selectedDate) {
+                Section("Suggested Item") {
+                    if isLoadingSuggestion && !didLoadSuggestion {
+                        ProgressView("Finding a high-priority item")
+                    } else if let suggestedItem {
+                        SuggestedItemRow(
+                            suggestion: suggestedItem,
+                            isProcessing: isProcessingSuggestion,
+                            accept: acceptSuggestion,
+                            dismiss: dismissSuggestion
+                        )
+                    } else {
+                        Label(
+                            "No more high-priority suggestions from yesterday.",
+                            systemImage: "checkmark.seal"
+                        )
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                        .padding(.vertical, 6)
+                    }
+                }
             }
 
             Section("Checklist") {
@@ -88,7 +115,7 @@ struct ByDayView: View {
             }
         }
         .navigationTitle("By Day")
-        .sheet(item: $editingItem) { item in
+        .sheet(item: $editingItem, onDismiss: reloadSuggestion) { item in
             EditChecklistItemView(item: item, reminderScheduler: reminderScheduler)
                 .presentationDetents([.medium, .large])
         }
@@ -99,11 +126,11 @@ struct ByDayView: View {
         }, message: {
             Text(errorMessage ?? "")
         })
-        .task {
-            loadChecklist()
+        .onAppear {
+            loadChecklistAndSuggestion()
         }
         .onChange(of: selectedDate) {
-            loadChecklist()
+            loadChecklistAndSuggestion()
         }
     }
 
@@ -124,6 +151,36 @@ struct ByDayView: View {
         }
     }
 
+    private func loadChecklistAndSuggestion() {
+        loadChecklist()
+        reloadSuggestion()
+    }
+
+    private func reloadSuggestion() {
+        guard ContentSuggestionService.supportsSuggestions(for: selectedDate) else {
+            suggestedItem = nil
+            didLoadSuggestion = false
+            isLoadingSuggestion = false
+            return
+        }
+
+        isLoadingSuggestion = true
+        defer {
+            isLoadingSuggestion = false
+            didLoadSuggestion = true
+        }
+
+        do {
+            suggestedItem = try ContentSuggestionService.nextSuggestion(
+                for: selectedDate,
+                in: modelContext
+            )
+        } catch {
+            suggestedItem = nil
+            errorMessage = error.localizedDescription
+        }
+    }
+
     private func addItem() {
         let title = newItemTitle.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !title.isEmpty, let checklist else { return }
@@ -131,7 +188,7 @@ struct ByDayView: View {
         do {
             _ = try ChecklistStore.addItem(title: title, to: checklist, in: modelContext)
             newItemTitle = ""
-            loadChecklist()
+            loadChecklistAndSuggestion()
         } catch {
             errorMessage = error.localizedDescription
         }
@@ -153,10 +210,107 @@ struct ByDayView: View {
         reminderScheduler.cancelAll(for: item)
         do {
             try ChecklistStore.deleteItem(item, in: modelContext)
-            loadChecklist()
+            loadChecklistAndSuggestion()
         } catch {
             errorMessage = error.localizedDescription
         }
+    }
+
+    private func acceptSuggestion() {
+        guard let suggestedItem, !isProcessingSuggestion else { return }
+        isProcessingSuggestion = true
+        defer { isProcessingSuggestion = false }
+
+        do {
+            _ = try ContentSuggestionService.accept(
+                suggestedItem,
+                for: selectedDate,
+                in: modelContext
+            )
+            loadChecklistAndSuggestion()
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+    }
+
+    private func dismissSuggestion() {
+        guard let suggestedItem, !isProcessingSuggestion else { return }
+        isProcessingSuggestion = true
+        defer { isProcessingSuggestion = false }
+
+        do {
+            try ContentSuggestionService.dismiss(suggestedItem, in: modelContext)
+            reloadSuggestion()
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+    }
+}
+
+private struct SuggestedItemRow: View {
+    let suggestion: SuggestedChecklistItem
+    let isProcessing: Bool
+    let accept: () -> Void
+    let dismiss: () -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: 6) {
+                Label(suggestion.sourceName, systemImage: "tray.full")
+                Text("|")
+                Text(suggestion.category.displayName)
+            }
+            .font(.caption)
+            .foregroundStyle(.secondary)
+            .lineLimit(1)
+
+            Text(suggestion.title)
+                .font(.headline)
+
+            if !suggestion.excerpt.isEmpty {
+                Text(suggestion.excerpt)
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(3)
+            }
+
+            Label(suggestion.reason, systemImage: "lightbulb")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+
+            HStack {
+                Button(action: dismiss) {
+                    Image(systemName: "xmark.circle")
+                        .font(.title2)
+                        .foregroundStyle(.red)
+                        .frame(width: 44, height: 44)
+                }
+                .buttonStyle(.borderless)
+                .disabled(isProcessing)
+                .accessibilityLabel("Dismiss suggestion")
+
+                if let url = suggestion.url {
+                    Link(destination: url) {
+                        Label("Open original", systemImage: "arrow.up.right.square")
+                            .font(.subheadline)
+                    }
+                }
+
+                Spacer()
+
+                Button(action: accept) {
+                    Image(systemName: "checkmark.circle.fill")
+                        .font(.title2)
+                        .foregroundStyle(.green)
+                        .frame(width: 44, height: 44)
+                }
+                .buttonStyle(.borderless)
+                .disabled(isProcessing)
+                .accessibilityLabel("Add suggestion to today's checklist")
+            }
+        }
+        .padding(.vertical, 4)
+        .accessibilityElement(children: .contain)
     }
 }
 
