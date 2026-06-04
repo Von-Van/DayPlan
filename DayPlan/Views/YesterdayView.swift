@@ -8,6 +8,7 @@ struct YesterdayView: View {
     @State private var digest: DailyContentDigest?
     @State private var isLoading = false
     @State private var errorMessage: String?
+    @State private var refreshReport: ContentRefreshReport?
 
     private var yesterday: Date {
         DateKeys.yesterday()
@@ -21,6 +22,12 @@ struct YesterdayView: View {
                 } else {
                     Text(digest?.summary ?? "No digest has been generated yet.")
                         .font(.body)
+
+                    if let refreshReport {
+                        Text(refreshDescription(for: refreshReport))
+                            .font(.caption)
+                            .foregroundStyle(refreshReport.hasFailures ? Color.orange : Color.secondary)
+                    }
                 }
             }
 
@@ -29,7 +36,7 @@ struct YesterdayView: View {
                     ContentUnavailableView(
                         "No content captured",
                         systemImage: "tray",
-                        description: Text("The sample local adapter will seed Yesterday until real sources are added.")
+                        description: Text("Add or enable RSS and Atom sources in Settings, then refresh Yesterday.")
                     )
                 }
             } else {
@@ -47,7 +54,7 @@ struct YesterdayView: View {
             ToolbarItem(placement: .primaryAction) {
                 Button {
                     Task {
-                        await loadDigest(forceRefresh: true)
+                        await loadDigest()
                     }
                 } label: {
                     Image(systemName: "arrow.clockwise")
@@ -56,7 +63,7 @@ struct YesterdayView: View {
             }
         }
         .task {
-            await loadDigest(forceRefresh: false)
+            await loadDigest()
         }
         .alert("Yesterday", isPresented: errorBinding, actions: {
             Button("OK") {
@@ -85,12 +92,12 @@ struct YesterdayView: View {
     }
 
     @MainActor
-    private func loadDigest(forceRefresh: Bool) async {
+    private func loadDigest() async {
         isLoading = true
         defer { isLoading = false }
 
         do {
-            try await ContentIngestionService.ingestYesterdaySampleIfNeeded(in: modelContext)
+            refreshReport = try await ContentIngestionService.refreshYesterday(in: modelContext)
             digest = try DailyDigestBuilder.digest(for: yesterday, in: modelContext)
             events = try ContentIngestionService.fetchEvents(
                 from: DateKeys.startOfDay(yesterday),
@@ -100,6 +107,19 @@ struct YesterdayView: View {
         } catch {
             errorMessage = error.localizedDescription
         }
+    }
+
+    private func refreshDescription(for report: ContentRefreshReport) -> String {
+        let refreshed = "\(report.refreshedSourceCount) source(s) refreshed"
+        let imported = "\(report.importedItemCount) new item(s)"
+        guard report.hasFailures else {
+            return "\(refreshed) | \(imported)"
+        }
+
+        let failures = report.failures
+            .map { "\($0.sourceName): \($0.message)" }
+            .joined(separator: " ")
+        return "\(refreshed) | \(imported) | \(failures)"
     }
 }
 
@@ -124,8 +144,25 @@ private struct ContentEventRow: View {
             Label(event.category.displayName, systemImage: iconName(for: event.category))
                 .font(.caption)
                 .foregroundStyle(.secondary)
+
+            if let url = eventURL {
+                Link(destination: url) {
+                    Label("Open item", systemImage: "arrow.up.right.square")
+                        .font(.caption)
+                }
+            }
         }
         .padding(.vertical, 6)
+    }
+
+    private var eventURL: URL? {
+        guard let urlString = event.urlString,
+              let url = URL(string: urlString),
+              FeedURLPolicy.isAllowed(url)
+        else {
+            return nil
+        }
+        return url
     }
 
     private func iconName(for category: ContentCategory) -> String {

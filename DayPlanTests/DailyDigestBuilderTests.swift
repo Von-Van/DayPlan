@@ -64,4 +64,147 @@ final class DailyDigestBuilderTests: XCTestCase {
 
         XCTAssertEqual(events.count, 3)
     }
+
+    func testIngestionReconcilesItemsWhenSourceFiltersChange() async throws {
+        let day = DateKeys.yesterday()
+        let end = DateKeys.dayAfter(day)
+        let first = ContentEventDraft(
+            id: "first",
+            sourceIdentifier: "rss.test",
+            sourceName: "Test Feed",
+            receivedAt: day.addingTimeInterval(3_600),
+            title: "First",
+            body: "Keep",
+            url: nil,
+            category: .article
+        )
+        let second = ContentEventDraft(
+            id: "second",
+            sourceIdentifier: "rss.test",
+            sourceName: "Test Feed",
+            receivedAt: day.addingTimeInterval(7_200),
+            title: "Second",
+            body: "Remove after filter change",
+            url: nil,
+            category: .article
+        )
+
+        _ = try await ContentIngestionService.ingest(
+            from: [StaticContentAdapter(drafts: [first, second])],
+            since: day,
+            until: end,
+            in: context
+        )
+        _ = try await ContentIngestionService.ingest(
+            from: [StaticContentAdapter(drafts: [first])],
+            since: day,
+            until: end,
+            in: context
+        )
+
+        let events = try ContentIngestionService.fetchEvents(from: day, until: end, in: context)
+        XCTAssertEqual(events.map(\.externalID), ["first"])
+    }
+}
+
+final class FeedSourceTests: XCTestCase {
+    func testFeedURLPolicyAcceptsPublicHTTPSAndRejectsUnsafeURLs() throws {
+        let valid = try FeedURLPolicy.validatedPublicHTTPSURL(from: "https://example.com/feed.xml#latest")
+        XCTAssertEqual(valid.absoluteString, "https://example.com/feed.xml")
+
+        XCTAssertThrowsError(try FeedURLPolicy.validatedPublicHTTPSURL(from: "http://example.com/feed.xml")) { error in
+            XCTAssertEqual(error as? FeedSourceError, .httpsRequired)
+        }
+        XCTAssertThrowsError(try FeedURLPolicy.validatedPublicHTTPSURL(from: "https://user:password@example.com/feed.xml")) { error in
+            XCTAssertEqual(error as? FeedSourceError, .credentialsNotAllowed)
+        }
+        XCTAssertThrowsError(try FeedURLPolicy.validatedPublicHTTPSURL(from: "https://localhost/feed.xml")) { error in
+            XCTAssertEqual(error as? FeedSourceError, .localAddressNotAllowed)
+        }
+        XCTAssertThrowsError(try FeedURLPolicy.validatedPublicHTTPSURL(from: "https://192.168.1.2/feed.xml")) { error in
+            XCTAssertEqual(error as? FeedSourceError, .localAddressNotAllowed)
+        }
+    }
+
+    func testRSSParserSanitizesAndAppliesKeywordFilters() throws {
+        let startDate = try XCTUnwrap(ISO8601DateFormatter().date(from: "2026-06-03T00:00:00Z"))
+        let endDate = try XCTUnwrap(ISO8601DateFormatter().date(from: "2026-06-04T00:00:00Z"))
+        let endpoint = try FeedURLPolicy.validatedPublicHTTPSURL(from: "https://example.com/feed.xml")
+        let configuration = FeedSourceConfiguration(
+            identifier: "rss.test",
+            displayName: "Test Feed",
+            endpointURL: endpoint,
+            includeKeywords: ["swift"],
+            excludeKeywords: ["sponsored"],
+            maxItems: 10
+        )
+        let xml = """
+        <?xml version="1.0" encoding="UTF-8"?>
+        <rss version="2.0">
+          <channel>
+            <title>Test Feed</title>
+            <item>
+              <guid>keep</guid>
+              <title>Swift release</title>
+              <description><![CDATA[<p>A useful &amp; concise update.</p>]]></description>
+              <link>https://example.com/keep</link>
+              <pubDate>Wed, 03 Jun 2026 12:00:00 +0000</pubDate>
+            </item>
+            <item>
+              <guid>exclude</guid>
+              <title>Sponsored Swift course</title>
+              <description>Promotion</description>
+              <pubDate>Wed, 03 Jun 2026 13:00:00 +0000</pubDate>
+            </item>
+            <item>
+              <guid>outside</guid>
+              <title>Swift from another day</title>
+              <description>Old item</description>
+              <pubDate>Tue, 02 Jun 2026 13:00:00 +0000</pubDate>
+            </item>
+          </channel>
+        </rss>
+        """
+
+        let drafts = try RSSAtomFeedParser.parse(
+            data: Data(xml.utf8),
+            configuration: configuration,
+            since: startDate,
+            until: endDate
+        )
+
+        XCTAssertEqual(drafts.count, 1)
+        XCTAssertEqual(drafts.first?.title, "Swift release")
+        XCTAssertEqual(drafts.first?.body, "A useful & concise update.")
+        XCTAssertEqual(drafts.first?.url?.absoluteString, "https://example.com/keep")
+    }
+
+    func testContentSourceStoresCustomization() {
+        let source = ContentSource(
+            identifier: "rss.test",
+            name: "Test",
+            kind: .rss,
+            endpointURLString: "https://example.com/feed.xml",
+            defaultCategory: .message,
+            includeKeywords: ["Swift", "iOS"],
+            excludeKeywords: ["Sponsored"],
+            maxItemsPerRefresh: 25
+        )
+
+        XCTAssertEqual(source.kind, .rss)
+        XCTAssertEqual(source.defaultCategory, .message)
+        XCTAssertEqual(source.includeKeywords, ["Swift", "iOS"])
+        XCTAssertEqual(source.excludeKeywords, ["Sponsored"])
+        XCTAssertEqual(source.maxItemsPerRefresh, 25)
+    }
+}
+
+private struct StaticContentAdapter: ContentSourceAdapter {
+    let identifier = "rss.test"
+    let displayName = "Test Feed"
+    let drafts: [ContentEventDraft]
+
+    func fetchContent(since startDate: Date, until endDate: Date) async throws -> [ContentEventDraft] {
+        drafts.filter { $0.receivedAt >= startDate && $0.receivedAt < endDate }
+    }
 }

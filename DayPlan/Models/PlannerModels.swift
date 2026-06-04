@@ -41,6 +41,20 @@ enum ContentCategory: String, Codable, CaseIterable, Identifiable {
     }
 }
 
+enum ContentSourceKind: String, Codable, CaseIterable, Identifiable {
+    case sample
+    case rss
+
+    var id: String { rawValue }
+
+    var displayName: String {
+        switch self {
+        case .sample: "Sample"
+        case .rss: "RSS / Atom"
+        }
+    }
+}
+
 @Model
 final class ChecklistTemplateItem: Identifiable {
     @Attribute(.unique) var id: UUID
@@ -287,6 +301,14 @@ final class ContentSource: Identifiable {
     var identifier: String
     var name: String
     var isEnabled: Bool
+    var kindRawValue: String = ContentSourceKind.sample.rawValue
+    var endpointURLString: String?
+    var defaultCategoryRawValue: String = ContentCategory.article.rawValue
+    var includeKeywordsString: String = ""
+    var excludeKeywordsString: String = ""
+    var maxItemsPerRefresh: Int = 30
+    var lastFetchedAt: Date?
+    var lastErrorMessage: String?
     var createdAt: Date
     var updatedAt: Date
 
@@ -298,6 +320,14 @@ final class ContentSource: Identifiable {
         identifier: String,
         name: String,
         isEnabled: Bool = true,
+        kind: ContentSourceKind = .sample,
+        endpointURLString: String? = nil,
+        defaultCategory: ContentCategory = .article,
+        includeKeywords: [String] = [],
+        excludeKeywords: [String] = [],
+        maxItemsPerRefresh: Int = 30,
+        lastFetchedAt: Date? = nil,
+        lastErrorMessage: String? = nil,
         createdAt: Date = .now,
         updatedAt: Date = .now
     ) {
@@ -305,9 +335,53 @@ final class ContentSource: Identifiable {
         self.identifier = identifier
         self.name = name
         self.isEnabled = isEnabled
+        self.kindRawValue = kind.rawValue
+        self.endpointURLString = endpointURLString
+        self.defaultCategoryRawValue = defaultCategory.rawValue
+        self.includeKeywordsString = includeKeywords.joined(separator: ",")
+        self.excludeKeywordsString = excludeKeywords.joined(separator: ",")
+        self.maxItemsPerRefresh = min(max(1, maxItemsPerRefresh), 100)
+        self.lastFetchedAt = lastFetchedAt
+        self.lastErrorMessage = lastErrorMessage
         self.createdAt = createdAt
         self.updatedAt = updatedAt
         self.events = []
+    }
+
+    var kind: ContentSourceKind {
+        get { ContentSourceKind(rawValue: kindRawValue) ?? .sample }
+        set { kindRawValue = newValue.rawValue }
+    }
+
+    var defaultCategory: ContentCategory {
+        get { ContentCategory(rawValue: defaultCategoryRawValue) ?? .article }
+        set { defaultCategoryRawValue = newValue.rawValue }
+    }
+
+    var includeKeywords: [String] {
+        get { Self.keywords(from: includeKeywordsString) }
+        set { includeKeywordsString = Self.keywordString(from: newValue) }
+    }
+
+    var excludeKeywords: [String] {
+        get { Self.keywords(from: excludeKeywordsString) }
+        set { excludeKeywordsString = Self.keywordString(from: newValue) }
+    }
+
+    private static func keywords(from value: String) -> [String] {
+        value
+            .split(separator: ",")
+            .prefix(20)
+            .map { String($0.trimmingCharacters(in: .whitespacesAndNewlines).prefix(64)) }
+            .filter { !$0.isEmpty }
+    }
+
+    private static func keywordString(from values: [String]) -> String {
+        values
+            .prefix(20)
+            .map { String($0.trimmingCharacters(in: .whitespacesAndNewlines).prefix(64)) }
+            .filter { !$0.isEmpty }
+            .joined(separator: ",")
     }
 }
 
