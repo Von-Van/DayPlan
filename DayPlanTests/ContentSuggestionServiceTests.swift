@@ -252,6 +252,95 @@ final class ContentSuggestionServiceTests: XCTestCase {
         XCTAssertFalse(ContentSuggestionService.notes(for: suggestion).contains("localhost"))
     }
 
+    func testSourceRulesCanDisableAndFilterSuggestions() throws {
+        context.insert(event(
+            id: "blocked-source",
+            sourceIdentifier: "blocked.test",
+            receivedAt: yesterday.addingTimeInterval(1_000),
+            title: "Submit source item",
+            category: .task
+        ))
+        context.insert(event(
+            id: "excluded",
+            sourceIdentifier: "rules.test",
+            receivedAt: yesterday.addingTimeInterval(2_000),
+            title: "Submit sponsored brief",
+            category: .task
+        ))
+        context.insert(event(
+            id: "eligible",
+            sourceIdentifier: "rules.test",
+            receivedAt: yesterday.addingTimeInterval(3_000),
+            title: "Submit budget brief",
+            category: .task
+        ))
+        context.insert(ContentSuggestionSourceRule(
+            sourceIdentifier: "blocked.test",
+            isEnabled: false
+        ))
+        context.insert(ContentSuggestionSourceRule(
+            sourceIdentifier: "rules.test",
+            includeKeywords: ["budget"],
+            excludeKeywords: ["sponsored"]
+        ))
+        try context.save()
+
+        let suggestion = try XCTUnwrap(
+            ContentSuggestionService.nextSuggestion(for: now, in: context, now: now)
+        )
+
+        XCTAssertEqual(suggestion.externalID, "eligible")
+    }
+
+    func testHighPrioritySourceCanLiftSuggestionPastThreshold() throws {
+        context.insert(event(
+            id: "normal",
+            sourceIdentifier: "normal.test",
+            receivedAt: yesterday.addingTimeInterval(10),
+            title: "Review background message",
+            category: .message
+        ))
+        context.insert(event(
+            id: "priority",
+            sourceIdentifier: "priority.test",
+            receivedAt: yesterday.addingTimeInterval(10),
+            title: "Review planning message",
+            category: .message
+        ))
+        context.insert(ContentSuggestionSourceRule(
+            sourceIdentifier: "priority.test",
+            priority: .high
+        ))
+        try context.save()
+
+        let suggestion = try XCTUnwrap(
+            ContentSuggestionService.nextSuggestion(for: now, in: context, now: now)
+        )
+
+        XCTAssertEqual(suggestion.externalID, "priority")
+        XCTAssertEqual(suggestion.score, 52)
+    }
+
+    func testClearingDismissedDecisionsKeepsAcceptedDecisions() throws {
+        context.insert(ContentSuggestionDecision(
+            eventKey: "accepted",
+            status: .accepted,
+            decidedAt: now
+        ))
+        context.insert(ContentSuggestionDecision(
+            eventKey: "dismissed",
+            status: .dismissed,
+            decidedAt: now
+        ))
+        try context.save()
+
+        XCTAssertEqual(try ContentSuggestionService.dismissedDecisionCount(in: context), 1)
+        try ContentSuggestionService.clearDismissedDecisions(in: context)
+
+        let remaining = try context.fetch(FetchDescriptor<ContentSuggestionDecision>())
+        XCTAssertEqual(remaining.map(\.eventKey), ["accepted"])
+    }
+
     func testDismissAdvancesUntilSuggestionsAreExhausted() throws {
         context.insert(event(
             id: "older",
@@ -333,10 +422,18 @@ final class ContentSuggestionServiceTests: XCTestCase {
             eventKey: "migration-event",
             status: .dismissed
         ))
+        migratedContext.insert(ContentSuggestionSourceRule(
+            sourceIdentifier: "rss.migrated",
+            priority: .high
+        ))
         try migratedContext.save()
         XCTAssertEqual(
             try migratedContext.fetch(FetchDescriptor<ContentSuggestionDecision>()).count,
             1
+        )
+        XCTAssertEqual(
+            try migratedContext.fetch(FetchDescriptor<ContentSuggestionSourceRule>()).first?.priority,
+            .high
         )
     }
 

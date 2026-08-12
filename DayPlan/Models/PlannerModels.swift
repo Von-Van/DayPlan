@@ -60,12 +60,37 @@ enum ContentSuggestionStatus: String, Codable, Equatable {
     case dismissed
 }
 
+enum ContentSuggestionSourcePriority: String, Codable, CaseIterable, Identifiable, Equatable {
+    case low
+    case normal
+    case high
+
+    var id: String { rawValue }
+
+    var displayName: String {
+        switch self {
+        case .low: "Low"
+        case .normal: "Normal"
+        case .high: "High"
+        }
+    }
+
+    var scoreAdjustment: Int {
+        switch self {
+        case .low: -15
+        case .normal: 0
+        case .high: 15
+        }
+    }
+}
+
 @Model
 final class ChecklistTemplateItem: Identifiable {
     @Attribute(.unique) var id: UUID
     var title: String
     var notes: String
     var isActive: Bool
+    var goalID: UUID?
     var sortOrder: Int
     var createdAt: Date
     var updatedAt: Date
@@ -75,6 +100,7 @@ final class ChecklistTemplateItem: Identifiable {
         title: String,
         notes: String = "",
         isActive: Bool = true,
+        goalID: UUID? = nil,
         sortOrder: Int = 0,
         createdAt: Date = .now,
         updatedAt: Date = .now
@@ -83,6 +109,7 @@ final class ChecklistTemplateItem: Identifiable {
         self.title = title
         self.notes = notes
         self.isActive = isActive
+        self.goalID = goalID
         self.sortOrder = sortOrder
         self.createdAt = createdAt
         self.updatedAt = updatedAt
@@ -126,6 +153,8 @@ final class DailyChecklistItem: Identifiable {
     var completedAt: Date?
     var isPersistent: Bool
     var templateID: UUID?
+    var goalID: UUID?
+    var goalActionID: UUID?
     var sortOrder: Int
     var createdAt: Date
     var updatedAt: Date
@@ -143,6 +172,8 @@ final class DailyChecklistItem: Identifiable {
         completedAt: Date? = nil,
         isPersistent: Bool = false,
         templateID: UUID? = nil,
+        goalID: UUID? = nil,
+        goalActionID: UUID? = nil,
         sortOrder: Int = 0,
         createdAt: Date = .now,
         updatedAt: Date = .now,
@@ -155,6 +186,8 @@ final class DailyChecklistItem: Identifiable {
         self.completedAt = completedAt
         self.isPersistent = isPersistent
         self.templateID = templateID
+        self.goalID = goalID
+        self.goalActionID = goalActionID
         self.sortOrder = sortOrder
         self.createdAt = createdAt
         self.updatedAt = updatedAt
@@ -248,6 +281,7 @@ final class CollectionItem: Identifiable {
     var tagString: String
     var isCompleted: Bool
     var completedAt: Date?
+    var goalID: UUID?
     var sortOrder: Int
     var createdAt: Date
     var updatedAt: Date
@@ -261,6 +295,7 @@ final class CollectionItem: Identifiable {
         tags: [String] = [],
         isCompleted: Bool = false,
         completedAt: Date? = nil,
+        goalID: UUID? = nil,
         sortOrder: Int = 0,
         createdAt: Date = .now,
         updatedAt: Date = .now,
@@ -273,6 +308,7 @@ final class CollectionItem: Identifiable {
         self.tagString = tags.joined(separator: ",")
         self.isCompleted = isCompleted
         self.completedAt = completedAt
+        self.goalID = goalID
         self.sortOrder = sortOrder
         self.createdAt = createdAt
         self.updatedAt = updatedAt
@@ -297,6 +333,98 @@ final class CollectionItem: Identifiable {
                 .filter { !$0.isEmpty }
                 .joined(separator: ",")
         }
+    }
+}
+
+@Model
+final class Goal: Identifiable {
+    @Attribute(.unique) var id: UUID
+    var title: String
+    var details: String
+    var colorName: String
+    var targetDate: Date?
+    var archivedAt: Date?
+    var sortOrder: Int
+    var createdAt: Date
+    var updatedAt: Date
+
+    @Relationship(deleteRule: .cascade, inverse: \GoalAction.goal)
+    var actions: [GoalAction]
+
+    init(
+        id: UUID = UUID(),
+        title: String,
+        details: String = "",
+        colorName: String = "green",
+        targetDate: Date? = nil,
+        archivedAt: Date? = nil,
+        sortOrder: Int = 0,
+        createdAt: Date = .now,
+        updatedAt: Date = .now
+    ) {
+        self.id = id
+        self.title = title
+        self.details = details
+        self.colorName = colorName
+        self.targetDate = targetDate
+        self.archivedAt = archivedAt
+        self.sortOrder = sortOrder
+        self.createdAt = createdAt
+        self.updatedAt = updatedAt
+        self.actions = []
+    }
+
+    var isArchived: Bool {
+        archivedAt != nil
+    }
+}
+
+@Model
+final class GoalAction: Identifiable {
+    @Attribute(.unique) var id: UUID
+    var title: String
+    var notes: String
+    var priorityRawValue: String
+    var isCompleted: Bool
+    var completedAt: Date?
+    var scheduledDate: Date?
+    var scheduledChecklistItemID: UUID?
+    var sortOrder: Int
+    var createdAt: Date
+    var updatedAt: Date
+    var goal: Goal?
+
+    init(
+        id: UUID = UUID(),
+        title: String,
+        notes: String = "",
+        priority: CollectionPriority = .none,
+        isCompleted: Bool = false,
+        completedAt: Date? = nil,
+        scheduledDate: Date? = nil,
+        scheduledChecklistItemID: UUID? = nil,
+        sortOrder: Int = 0,
+        createdAt: Date = .now,
+        updatedAt: Date = .now,
+        goal: Goal? = nil
+    ) {
+        self.id = id
+        self.title = title
+        self.notes = notes
+        self.priorityRawValue = priority.rawValue
+        self.isCompleted = isCompleted
+        self.completedAt = completedAt
+        self.scheduledDate = scheduledDate
+        self.scheduledChecklistItemID = scheduledChecklistItemID
+        self.sortOrder = sortOrder
+        self.createdAt = createdAt
+        self.updatedAt = updatedAt
+        self.goal = goal
+    }
+
+    var priority: CollectionPriority {
+        get { CollectionPriority(rawValue: priorityRawValue) ?? .none }
+        set { priorityRawValue = newValue.rawValue }
     }
 }
 
@@ -483,5 +611,68 @@ final class ContentSuggestionDecision: Identifiable {
 
     static func eventKey(sourceIdentifier: String, externalID: String) -> String {
         "v1|\(sourceIdentifier.utf8.count):\(sourceIdentifier)|\(externalID)"
+    }
+}
+
+@Model
+final class ContentSuggestionSourceRule: Identifiable {
+    @Attribute(.unique) var id: UUID
+    @Attribute(.unique) var sourceIdentifier: String
+    var isEnabled: Bool
+    var priorityRawValue: String
+    var includeKeywordsString: String
+    var excludeKeywordsString: String
+    var createdAt: Date
+    var updatedAt: Date
+
+    init(
+        id: UUID = UUID(),
+        sourceIdentifier: String,
+        isEnabled: Bool = true,
+        priority: ContentSuggestionSourcePriority = .normal,
+        includeKeywords: [String] = [],
+        excludeKeywords: [String] = [],
+        createdAt: Date = .now,
+        updatedAt: Date = .now
+    ) {
+        self.id = id
+        self.sourceIdentifier = sourceIdentifier
+        self.isEnabled = isEnabled
+        self.priorityRawValue = priority.rawValue
+        self.includeKeywordsString = Self.keywordString(from: includeKeywords)
+        self.excludeKeywordsString = Self.keywordString(from: excludeKeywords)
+        self.createdAt = createdAt
+        self.updatedAt = updatedAt
+    }
+
+    var priority: ContentSuggestionSourcePriority {
+        get { ContentSuggestionSourcePriority(rawValue: priorityRawValue) ?? .normal }
+        set { priorityRawValue = newValue.rawValue }
+    }
+
+    var includeKeywords: [String] {
+        get { Self.keywords(from: includeKeywordsString) }
+        set { includeKeywordsString = Self.keywordString(from: newValue) }
+    }
+
+    var excludeKeywords: [String] {
+        get { Self.keywords(from: excludeKeywordsString) }
+        set { excludeKeywordsString = Self.keywordString(from: newValue) }
+    }
+
+    private static func keywords(from value: String) -> [String] {
+        value
+            .split(separator: ",")
+            .prefix(20)
+            .map { String($0.trimmingCharacters(in: .whitespacesAndNewlines).prefix(64)) }
+            .filter { !$0.isEmpty }
+    }
+
+    private static func keywordString(from values: [String]) -> String {
+        values
+            .prefix(20)
+            .map { String($0.trimmingCharacters(in: .whitespacesAndNewlines).prefix(64)) }
+            .filter { !$0.isEmpty }
+            .joined(separator: ",")
     }
 }

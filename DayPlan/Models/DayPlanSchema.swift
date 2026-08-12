@@ -8,12 +8,15 @@ enum DayPlanSchema {
         ReminderSchedule.self,
         CollectionList.self,
         CollectionItem.self,
+        Goal.self,
+        GoalAction.self,
         ContentSource.self,
         ContentEvent.self,
         DailyContentDigest.self
     ]
 
     static let models: [any PersistentModel.Type] = modelsBeforeContentSuggestions + [
-        ContentSuggestionDecision.self
+        ContentSuggestionDecision.self,
+        ContentSuggestionSourceRule.self
     ]
 }

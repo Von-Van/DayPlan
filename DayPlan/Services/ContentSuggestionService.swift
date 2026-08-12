@@ -67,12 +67,15 @@ enum ContentSuggestionService {
         )
         let checklistTitles = try normalizedChecklistTitles(for: date, in: context)
         let sourceCounts = Dictionary(grouping: events, by: \.sourceIdentifier).mapValues(\.count)
+        let rules = try sourceRules(in: context)
 
         return events
             .compactMap { event -> SuggestedChecklistItem? in
+                let rule = rules[event.sourceIdentifier]
                 let eventKey = eventKey(for: event)
                 let normalizedEventTitle = normalizedTitle(event.title)
                 guard !decidedKeys.contains(eventKey),
+                      allows(event, with: rule),
                       !normalizedEventTitle.isEmpty,
                       !checklistTitles.contains(normalizedEventTitle)
                 else {
@@ -80,7 +83,12 @@ enum ContentSuggestionService {
                 }
 
                 let sourceCount = sourceCounts[event.sourceIdentifier] ?? 1
-                let score = score(for: event, sourceEventCount: sourceCount, dayStart: yesterday)
+                let score = score(
+                    for: event,
+                    sourceEventCount: sourceCount,
+                    dayStart: yesterday,
+                    rule: rule
+                )
                 guard score >= minimumScore else { return nil }
 
                 return SuggestedChecklistItem(
@@ -93,7 +101,12 @@ enum ContentSuggestionService {
                     url: allowedURL(from: event.urlString),
                     receivedAt: event.receivedAt,
                     score: score,
-                    reason: reason(for: event, sourceEventCount: sourceCount, dayStart: yesterday)
+                    reason: reason(
+                        for: event,
+                        sourceEventCount: sourceCount,
+                        dayStart: yesterday,
+                        rule: rule
+                    )
                 )
             }
             .sorted(by: suggestionSort)
@@ -140,7 +153,9 @@ enum ContentSuggestionService {
             throw error
         }
 
+        #if os(iOS)
         WidgetChecklistSync.publish(checklist)
+        #endif
         return checklistItem
     }
 
@@ -177,10 +192,58 @@ enum ContentSuggestionService {
         sourceEventCount: Int,
         dayStart: Date
     ) -> Int {
+        score(for: event, sourceEventCount: sourceEventCount, dayStart: dayStart, rule: nil)
+    }
+
+    static func rule(
+        for sourceIdentifier: String,
+        in context: ModelContext,
+        createIfMissing: Bool = false
+    ) throws -> ContentSuggestionSourceRule? {
+        var descriptor = FetchDescriptor<ContentSuggestionSourceRule>(
+            predicate: #Predicate { rule in
+                rule.sourceIdentifier == sourceIdentifier
+            }
+        )
+        descriptor.fetchLimit = 1
+
+        if let existing = try context.fetch(descriptor).first {
+            return existing
+        }
+
+        guard createIfMissing else { return nil }
+
+        let rule = ContentSuggestionSourceRule(sourceIdentifier: sourceIdentifier)
+        context.insert(rule)
+        return rule
+    }
+
+    static func dismissedDecisionCount(in context: ModelContext) throws -> Int {
+        try context.fetch(FetchDescriptor<ContentSuggestionDecision>())
+            .filter { $0.status == .dismissed }
+            .count
+    }
+
+    static func clearDismissedDecisions(in context: ModelContext) throws {
+        let dismissed = try context.fetch(FetchDescriptor<ContentSuggestionDecision>())
+            .filter { $0.status == .dismissed }
+        for decision in dismissed {
+            context.delete(decision)
+        }
+        try context.save()
+    }
+
+    private static func score(
+        for event: ContentEvent,
+        sourceEventCount: Int,
+        dayStart: Date,
+        rule: ContentSuggestionSourceRule?
+    ) -> Int {
         categoryPoints(for: event.category)
             + actionPoints(for: event)
             + recencyPoints(for: event.receivedAt, dayStart: dayStart)
             + sourceActivityPoints(for: sourceEventCount)
+            + (rule?.priority.scoreAdjustment ?? 0)
     }
 
     static func normalizedTitle(_ title: String) -> String {
@@ -220,6 +283,31 @@ enum ContentSuggestionService {
             return []
         }
         return Set(checklist.items.map { normalizedTitle($0.title) })
+    }
+
+    private static func sourceRules(in context: ModelContext) throws -> [String: ContentSuggestionSourceRule] {
+        let rules = try context.fetch(FetchDescriptor<ContentSuggestionSourceRule>())
+        return Dictionary(uniqueKeysWithValues: rules.map { ($0.sourceIdentifier, $0) })
+    }
+
+    private static func allows(_ event: ContentEvent, with rule: ContentSuggestionSourceRule?) -> Bool {
+        guard let rule else { return true }
+        guard rule.isEnabled else { return false }
+
+        let text = " \(normalizedTitle(collapsedText("\(event.title) \(event.body)", limit: 2_000))) "
+        let includeKeywords = Set(rule.includeKeywords.map { normalizedTitle($0) }.filter { !$0.isEmpty })
+        let excludeKeywords = Set(rule.excludeKeywords.map { normalizedTitle($0) }.filter { !$0.isEmpty })
+
+        if !includeKeywords.isEmpty,
+           !includeKeywords.contains(where: { text.contains(" \($0) ") }) {
+            return false
+        }
+
+        if excludeKeywords.contains(where: { text.contains(" \($0) ") }) {
+            return false
+        }
+
+        return true
     }
 
     private static func decision(
@@ -271,18 +359,21 @@ enum ContentSuggestionService {
     private static func reason(
         for event: ContentEvent,
         sourceEventCount: Int,
-        dayStart: Date
+        dayStart: Date,
+        rule: ContentSuggestionSourceRule?
     ) -> String {
         let actionScore = actionPoints(for: event)
         let categoryScore = categoryPoints(for: event.category)
         let recencyScore = recencyPoints(for: event.receivedAt, dayStart: dayStart)
         let sourceScore = sourceActivityPoints(for: sourceEventCount)
+        let priorityScore = max(rule?.priority.scoreAdjustment ?? 0, 0)
 
         let contributors: [(points: Int, priority: Int, reason: String)] = [
             (categoryScore, 0, categoryReason(for: event.category)),
             (actionScore, 1, "Action-oriented wording suggests a follow-up"),
             (recencyScore, 2, "One of yesterday's most recent items"),
-            (sourceScore, 3, "Repeated activity from \(event.sourceName)")
+            (sourceScore, 3, "Repeated activity from \(event.sourceName)"),
+            (priorityScore, 4, "\(event.sourceName) is marked high priority")
         ]
 
         return contributors

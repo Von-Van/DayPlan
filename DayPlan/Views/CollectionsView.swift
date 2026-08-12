@@ -87,7 +87,7 @@ private struct NewCollectionView: View {
                     .lineLimit(2...4)
             }
             .navigationTitle("New Collection")
-            .navigationBarTitleDisplayMode(.inline)
+            .dayPlanInlineNavigationTitle()
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Cancel") {

@@ -1,6 +1,6 @@
-# DayPlan iOS
+# DayPlan
 
-Native SwiftUI rewrite of DayPlan for iPhone.
+Native SwiftUI rewrite of DayPlan for iPhone and Mac.
 
 This app is intentionally local-first. Planner data, collection data, reminder
 settings, and content digests are stored on-device with SwiftData. There is no
@@ -12,9 +12,16 @@ The previous Flask desktop prototype is preserved on the
 ## App Shape
 
 - By Day: daily checklist with historical calendar selection.
+- Goals: native Mac workspace for larger outcomes, goal action backlogs, and
+  scheduling actions into daily checklists.
 - Collections: non-date-bound task lists.
 - Yesterday: local content digest fed by explicit source adapters.
 - Settings: notification permission, source toggles, and future data tools.
+
+The Mac app is a separate native target named `DayPlanMac`. It uses its own
+local SwiftData store and opens to a Goals + Today workspace. It does not sync
+automatically with the iPhone app; use JSON export/import to move data between
+devices.
 
 ## Checklist Widget
 
@@ -53,6 +60,19 @@ non-persistent, reminder-free checklist item with source context; dismissing
 permanently excludes that source event. Decisions and scoring remain on-device,
 and no content is sent to a cloud AI service.
 
+Suggestion source controls in Settings let each source be disabled for
+suggestions, marked low/normal/high priority, and filtered with suggestion-only
+include/exclude keywords. Dismissed suggestion decisions can be cleared without
+reintroducing already accepted suggestions.
+
+## Stats And Data
+
+Stats summarize today, recent daily checklist completion, streaks, and
+collection completion from local SwiftData history.
+
+Settings can export a JSON backup of local DayPlan data and import a backup by
+replacing the current on-device data after confirmation.
+
 ## Notification Scope
 
 iOS apps can schedule and manage their own notifications. They cannot read all
@@ -82,4 +102,5 @@ simulator or device.
 
 ```bash
 xcodebuild -project DayPlan.xcodeproj -scheme DayPlan -destination 'platform=iOS Simulator,name=iPhone 17' test
+xcodebuild -project DayPlan.xcodeproj -scheme DayPlanMac -destination 'platform=macOS' build
 ```

@@ -1,5 +1,6 @@
 import SwiftData
 import SwiftUI
+import UniformTypeIdentifiers
 import UserNotifications
 
 struct SettingsView: View {
@@ -12,13 +13,36 @@ struct SettingsView: View {
     @State private var errorMessage: String?
     @State private var isAddingSource = false
     @State private var editingSource: ContentSource?
+    @State private var dismissedSuggestionCount = 0
+    @State private var isConfirmingDismissedClear = false
+    @State private var exportDocument = DayPlanArchiveDocument()
+    @State private var isExportingArchive = false
+    @State private var isImportingArchive = false
+    @State private var pendingImportData: Data?
+    @State private var isConfirmingImport = false
 
     private let reminderScheduler: ReminderManaging = UserNotificationReminderScheduler()
+
+    private var deviceName: String {
+        #if os(macOS)
+        "Mac"
+        #else
+        "iPhone"
+        #endif
+    }
+
+    private var deviceSystemImage: String {
+        #if os(macOS)
+        "desktopcomputer"
+        #else
+        "iphone"
+        #endif
+    }
 
     var body: some View {
         List {
             Section("Local-First") {
-                Label("All planner data stays on this iPhone.", systemImage: "iphone")
+                Label("All planner data stays on this \(deviceName).", systemImage: deviceSystemImage)
                 Label("No account, server, or cloud sync is used.", systemImage: "lock")
                 Label("Other apps' Notification Center alerts are not scraped.", systemImage: "hand.raised")
             }
@@ -39,7 +63,7 @@ struct SettingsView: View {
             } header: {
                 Text("Notifications")
             } footer: {
-                Text("Reminders use iOS local notifications scheduled by DayPlan for DayPlan checklist items.")
+                Text("Reminders use local notifications scheduled by DayPlan for DayPlan checklist items.")
             }
 
             Section {
@@ -83,18 +107,49 @@ struct SettingsView: View {
             }
 
             Section("Stats") {
-                Label("Completion history is stored now; charts come later.", systemImage: "chart.line.uptrend.xyaxis")
-                    .foregroundStyle(.secondary)
+                NavigationLink {
+                    StatsView()
+                } label: {
+                    Label("Completion Stats", systemImage: "chart.line.uptrend.xyaxis")
+                }
+            }
+
+            Section("Suggestions") {
+                NavigationLink {
+                    SuggestionControlsView()
+                } label: {
+                    Label("Source Controls", systemImage: "slider.horizontal.3")
+                }
+
+                Button(role: .destructive) {
+                    isConfirmingDismissedClear = true
+                } label: {
+                    Label(
+                        "Clear Dismissed Suggestions (\(dismissedSuggestionCount))",
+                        systemImage: "arrow.counterclockwise"
+                    )
+                }
+                .disabled(dismissedSuggestionCount == 0)
             }
 
             Section("Data Tools") {
-                Label("Local export/import will be added after the v1 model settles.", systemImage: "square.and.arrow.up")
-                    .foregroundStyle(.secondary)
+                Button {
+                    exportArchive()
+                } label: {
+                    Label("Export JSON Backup", systemImage: "square.and.arrow.up")
+                }
+
+                Button {
+                    isImportingArchive = true
+                } label: {
+                    Label("Import JSON Backup", systemImage: "square.and.arrow.down")
+                }
             }
         }
         .navigationTitle("Settings")
         .task {
             await refreshNotificationStatus()
+            refreshDismissedSuggestionCount()
         }
         .sheet(isPresented: $isAddingSource) {
             ContentSourceEditorView()
@@ -109,6 +164,44 @@ struct SettingsView: View {
         }, message: {
             Text(errorMessage ?? "")
         })
+        .confirmationDialog(
+            "Clear dismissed suggestions?",
+            isPresented: $isConfirmingDismissedClear,
+            titleVisibility: .visible
+        ) {
+            Button("Clear Dismissed Suggestions", role: .destructive) {
+                clearDismissedSuggestions()
+            }
+        } message: {
+            Text("Accepted suggestions stay excluded so existing checklist items are not suggested again.")
+        }
+        .confirmationDialog(
+            "Replace local DayPlan data?",
+            isPresented: $isConfirmingImport,
+            titleVisibility: .visible
+        ) {
+            Button("Replace Local Data", role: .destructive) {
+                importPendingArchive()
+            }
+        } message: {
+            Text("This imports the selected backup and replaces the current local planner data on this device.")
+        }
+        .fileExporter(
+            isPresented: $isExportingArchive,
+            document: exportDocument,
+            contentType: .json,
+            defaultFilename: "DayPlan Backup \(DateKeys.dayKey(for: .now))"
+        ) { result in
+            if case let .failure(error) = result {
+                errorMessage = error.localizedDescription
+            }
+        }
+        .fileImporter(
+            isPresented: $isImportingArchive,
+            allowedContentTypes: [.json]
+        ) { result in
+            prepareImport(result)
+        }
     }
 
     @ViewBuilder
@@ -182,6 +275,63 @@ struct SettingsView: View {
         }
     }
 
+    private func refreshDismissedSuggestionCount() {
+        do {
+            dismissedSuggestionCount = try ContentSuggestionService.dismissedDecisionCount(in: modelContext)
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+    }
+
+    private func clearDismissedSuggestions() {
+        do {
+            try ContentSuggestionService.clearDismissedDecisions(in: modelContext)
+            refreshDismissedSuggestionCount()
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+    }
+
+    private func exportArchive() {
+        do {
+            exportDocument = DayPlanArchiveDocument(
+                data: try DataArchiveService.exportData(in: modelContext)
+            )
+            isExportingArchive = true
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+    }
+
+    private func prepareImport(_ result: Result<URL, Error>) {
+        do {
+            let url = try result.get()
+            let canAccess = url.startAccessingSecurityScopedResource()
+            defer {
+                if canAccess {
+                    url.stopAccessingSecurityScopedResource()
+                }
+            }
+
+            pendingImportData = try Data(contentsOf: url)
+            isConfirmingImport = true
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+    }
+
+    private func importPendingArchive() {
+        guard let pendingImportData else { return }
+        do {
+            try DataArchiveService.replaceData(with: pendingImportData, in: modelContext)
+            self.pendingImportData = nil
+            refreshDismissedSuggestionCount()
+            errorMessage = "Import complete."
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+    }
+
     @MainActor
     private func requestNotifications() async {
         do {
@@ -209,6 +359,142 @@ struct SettingsView: View {
         @unknown default:
             notificationStatus = "Unknown"
         }
+    }
+}
+
+private struct SuggestionControlsView: View {
+    @Query(sort: \ContentSource.name)
+    private var sources: [ContentSource]
+
+    var body: some View {
+        List {
+            if sources.isEmpty {
+                ContentUnavailableView(
+                    "No content sources",
+                    systemImage: "slider.horizontal.3",
+                    description: Text("Add a Yesterday source before adjusting suggestion controls.")
+                )
+            } else {
+                ForEach(sources) { source in
+                    NavigationLink {
+                        SuggestionRuleEditorView(source: source)
+                    } label: {
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text(source.name)
+                            Text(source.identifier)
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                }
+            }
+        }
+        .navigationTitle("Suggestion Sources")
+    }
+}
+
+private struct SuggestionRuleEditorView: View {
+    @Environment(\.dismiss) private var dismiss
+    @Environment(\.modelContext) private var modelContext
+
+    let source: ContentSource
+
+    @State private var isEnabled = true
+    @State private var priority: ContentSuggestionSourcePriority = .normal
+    @State private var includeKeywordsString = ""
+    @State private var excludeKeywordsString = ""
+    @State private var errorMessage: String?
+
+    var body: some View {
+        Form {
+            Section {
+                Toggle("Use for suggestions", isOn: $isEnabled)
+
+                Picker("Priority", selection: $priority) {
+                    ForEach(ContentSuggestionSourcePriority.allCases) { priority in
+                        Text(priority.displayName).tag(priority)
+                    }
+                }
+            } header: {
+                Text(source.name)
+            } footer: {
+                Text("Priority nudges the deterministic score without changing the original Yesterday item.")
+            }
+
+            Section {
+                TextField("Include keywords", text: $includeKeywordsString)
+                    .dayPlanNoAutocapitalization()
+                TextField("Exclude keywords", text: $excludeKeywordsString)
+                    .dayPlanNoAutocapitalization()
+            } header: {
+                Text("Suggestion Keywords")
+            } footer: {
+                Text("Leave include keywords empty to allow every item from this source. Exclude keywords always win.")
+            }
+        }
+        .navigationTitle("Suggestion Rules")
+        .dayPlanInlineNavigationTitle()
+        .toolbar {
+            ToolbarItem(placement: .confirmationAction) {
+                Button("Save") {
+                    save()
+                }
+            }
+        }
+        .onAppear(perform: load)
+        .alert("Suggestion Rules", isPresented: .constant(errorMessage != nil), actions: {
+            Button("OK") {
+                errorMessage = nil
+            }
+        }, message: {
+            Text(errorMessage ?? "")
+        })
+    }
+
+    private func load() {
+        do {
+            guard let rule = try ContentSuggestionService.rule(
+                for: source.identifier,
+                in: modelContext,
+                createIfMissing: false
+            ) else {
+                return
+            }
+
+            isEnabled = rule.isEnabled
+            priority = rule.priority
+            includeKeywordsString = rule.includeKeywordsString
+            excludeKeywordsString = rule.excludeKeywordsString
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+    }
+
+    private func save() {
+        do {
+            let rule = try ContentSuggestionService.rule(
+                for: source.identifier,
+                in: modelContext,
+                createIfMissing: true
+            )
+            rule?.isEnabled = isEnabled
+            rule?.priority = priority
+            rule?.includeKeywords = keywords(from: includeKeywordsString)
+            rule?.excludeKeywords = keywords(from: excludeKeywordsString)
+            rule?.updatedAt = .now
+            try modelContext.save()
+            dismiss()
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+    }
+
+    private func keywords(from value: String) -> [String] {
+        value
+            .split(separator: ",")
+            .prefix(20)
+            .map { String($0.trimmingCharacters(in: .whitespacesAndNewlines).prefix(64)) }
+            .filter { !$0.isEmpty }
     }
 }
 
@@ -242,9 +528,9 @@ private struct ContentSourceEditorView: View {
                 Section {
                     TextField("Source name", text: $name)
                     TextField("https://example.com/feed.xml", text: $endpointURLString)
-                        .keyboardType(.URL)
-                        .textInputAutocapitalization(.never)
-                        .autocorrectionDisabled()
+                        .dayPlanURLKeyboard()
+                        .dayPlanNoAutocapitalization()
+                        .dayPlanAutocorrectionDisabled()
                 } header: {
                     Text("Feed")
                 } footer: {
@@ -259,9 +545,9 @@ private struct ContentSourceEditorView: View {
                     }
 
                     TextField("Include keywords", text: $includeKeywordsString)
-                        .textInputAutocapitalization(.never)
+                        .dayPlanNoAutocapitalization()
                     TextField("Exclude keywords", text: $excludeKeywordsString)
-                        .textInputAutocapitalization(.never)
+                        .dayPlanNoAutocapitalization()
 
                     Stepper("Maximum items: \(maxItems)", value: $maxItems, in: 5...100, step: 5)
                 } header: {
@@ -271,7 +557,7 @@ private struct ContentSourceEditorView: View {
                 }
             }
             .navigationTitle(source == nil ? "Add Source" : "Edit Source")
-            .navigationBarTitleDisplayMode(.inline)
+            .dayPlanInlineNavigationTitle()
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Cancel") {

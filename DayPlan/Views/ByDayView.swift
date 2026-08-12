@@ -108,10 +108,12 @@ struct ByDayView: View {
                 }
             }
 
-            Section("Future Stats") {
-                Label("Completion history is being stored for a later stats view.", systemImage: "chart.bar.doc.horizontal")
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
+            Section("Stats") {
+                NavigationLink {
+                    StatsView()
+                } label: {
+                    Label("View Completion Stats", systemImage: "chart.bar.doc.horizontal")
+                }
             }
         }
         .navigationTitle("By Day")

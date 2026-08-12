@@ -19,7 +19,7 @@ enum ChecklistStore {
             if createIfMissing {
                 try materializeTemplateItems(into: existing, in: context)
                 try context.save()
-                WidgetChecklistSync.publish(existing)
+                publishToWidgetIfAvailable(existing)
             }
             return existing
         }
@@ -30,31 +30,44 @@ enum ChecklistStore {
         context.insert(checklist)
         try materializeTemplateItems(into: checklist, in: context)
         try context.save()
-        WidgetChecklistSync.publish(checklist)
+        publishToWidgetIfAvailable(checklist)
         return checklist
     }
 
     static func addItem(
         title: String,
         notes: String = "",
+        goalID: UUID? = nil,
+        goalActionID: UUID? = nil,
         to checklist: DailyChecklist,
         in context: ModelContext
     ) throws -> DailyChecklistItem {
-        let item = insertItem(title: title, notes: notes, to: checklist, in: context)
+        let item = insertItem(
+            title: title,
+            notes: notes,
+            goalID: goalID,
+            goalActionID: goalActionID,
+            to: checklist,
+            in: context
+        )
         try context.save()
-        WidgetChecklistSync.publish(checklist)
+        publishToWidgetIfAvailable(checklist)
         return item
     }
 
     static func insertItem(
         title: String,
         notes: String = "",
+        goalID: UUID? = nil,
+        goalActionID: UUID? = nil,
         to checklist: DailyChecklist,
         in context: ModelContext
     ) -> DailyChecklistItem {
         let item = DailyChecklistItem(
             title: title.trimmingCharacters(in: .whitespacesAndNewlines),
             notes: notes,
+            goalID: goalID,
+            goalActionID: goalActionID,
             sortOrder: checklist.items.count,
             checklist: checklist
         )
@@ -75,9 +88,10 @@ enum ChecklistStore {
         item.completedAt = nextValue ? .now : nil
         item.updatedAt = .now
         item.checklist?.updatedAt = .now
+        try GoalStore.mirrorCompletion(from: item, in: context)
         try context.save()
         if let checklist {
-            WidgetChecklistSync.publish(checklist)
+            publishToWidgetIfAvailable(checklist)
         }
     }
 
@@ -98,6 +112,7 @@ enum ChecklistStore {
                 templateID: templateID,
                 title: cleanTitle,
                 notes: notes,
+                goalID: item.goalID,
                 from: DateKeys.startOfDay(.now),
                 in: context
             )
@@ -105,7 +120,33 @@ enum ChecklistStore {
 
         try context.save()
         if let checklist = item.checklist {
-            WidgetChecklistSync.publish(checklist)
+            publishToWidgetIfAvailable(checklist)
+        }
+    }
+
+    static func setGoal(
+        _ goalID: UUID?,
+        for item: DailyChecklistItem,
+        in context: ModelContext
+    ) throws {
+        try GoalStore.unlinkScheduledAction(for: item, in: context)
+        item.goalID = goalID
+        item.goalActionID = nil
+        item.updatedAt = .now
+        item.checklist?.updatedAt = .now
+
+        if item.isPersistent, let templateID = item.templateID {
+            try updateTemplateGoalAndFutureCopies(
+                templateID,
+                goalID: goalID,
+                from: DateKeys.startOfDay(.now),
+                in: context
+            )
+        }
+
+        try context.save()
+        if let checklist = item.checklist {
+            publishToWidgetIfAvailable(checklist)
         }
     }
 
@@ -122,6 +163,7 @@ enum ChecklistStore {
                 template = ChecklistTemplateItem(
                     title: item.title,
                     notes: item.notes,
+                    goalID: item.goalID,
                     sortOrder: item.sortOrder
                 )
                 context.insert(template)
@@ -130,6 +172,7 @@ enum ChecklistStore {
             template.title = item.title
             template.notes = item.notes
             template.isActive = true
+            template.goalID = item.goalID
             template.updatedAt = .now
             item.isPersistent = true
             item.templateID = template.id
@@ -145,7 +188,7 @@ enum ChecklistStore {
         item.checklist?.updatedAt = .now
         try context.save()
         if let checklist = item.checklist {
-            WidgetChecklistSync.publish(checklist)
+            publishToWidgetIfAvailable(checklist)
         }
     }
 
@@ -155,10 +198,11 @@ enum ChecklistStore {
     ) throws {
         let checklist = item.checklist
         checklist?.updatedAt = .now
+        try GoalStore.unlinkScheduledAction(for: item, in: context)
         context.delete(item)
         try context.save()
         if let checklist {
-            WidgetChecklistSync.publish(checklist)
+            publishToWidgetIfAvailable(checklist)
         }
     }
 
@@ -188,6 +232,7 @@ enum ChecklistStore {
                 notes: template.notes,
                 isPersistent: true,
                 templateID: template.id,
+                goalID: template.goalID,
                 sortOrder: checklist.items.count,
                 checklist: checklist
             )
@@ -231,6 +276,7 @@ enum ChecklistStore {
         templateID: UUID,
         title: String,
         notes: String,
+        goalID: UUID?,
         from startDate: Date,
         in context: ModelContext
     ) throws {
@@ -243,6 +289,7 @@ enum ChecklistStore {
         if let template = try context.fetch(templateDescriptor).first {
             template.title = title
             template.notes = notes
+            template.goalID = goalID
             template.updatedAt = .now
         }
 
@@ -255,7 +302,45 @@ enum ChecklistStore {
         for copy in try context.fetch(itemDescriptor) where (copy.checklist?.date ?? .distantPast) >= startDate {
             copy.title = title
             copy.notes = notes
+            copy.goalID = goalID
             copy.updatedAt = .now
         }
+    }
+
+    private static func updateTemplateGoalAndFutureCopies(
+        _ templateID: UUID,
+        goalID: UUID?,
+        from startDate: Date,
+        in context: ModelContext
+    ) throws {
+        var templateDescriptor = FetchDescriptor<ChecklistTemplateItem>(
+            predicate: #Predicate { template in
+                template.id == templateID
+            }
+        )
+        templateDescriptor.fetchLimit = 1
+        if let template = try context.fetch(templateDescriptor).first {
+            template.goalID = goalID
+            template.updatedAt = .now
+        }
+
+        let itemDescriptor = FetchDescriptor<DailyChecklistItem>(
+            predicate: #Predicate { copy in
+                copy.templateID == templateID
+            }
+        )
+
+        for copy in try context.fetch(itemDescriptor) where (copy.checklist?.date ?? .distantPast) >= startDate {
+            copy.goalID = goalID
+            copy.goalActionID = nil
+            copy.updatedAt = .now
+            copy.checklist?.updatedAt = .now
+        }
+    }
+
+    private static func publishToWidgetIfAvailable(_ checklist: DailyChecklist) {
+        #if os(iOS)
+        WidgetChecklistSync.publish(checklist)
+        #endif
     }
 }

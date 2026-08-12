@@ -58,7 +58,7 @@ struct EditChecklistItemView: View {
                 }
             }
             .navigationTitle("Edit Task")
-            .navigationBarTitleDisplayMode(.inline)
+            .dayPlanInlineNavigationTitle()
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Cancel") {

@@ -37,6 +37,38 @@
 		A0000000000000000000001C /* DayPlanWidget.appex in Embed App Extensions */ = {isa = PBXBuildFile; fileRef = A00000000000000000000122 /* DayPlanWidget.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
 		A0000000000000000000001D /* ContentSuggestionService.swift in Sources */ = {isa = PBXBuildFile; fileRef = A0000000000000000000011E /* ContentSuggestionService.swift */; };
 		A0000000000000000000001E /* ContentSuggestionServiceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A0000000000000000000011F /* ContentSuggestionServiceTests.swift */; };
+		A0000000000000000000001F /* CompletionStatsService.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000123 /* CompletionStatsService.swift */; };
+		A00000000000000000000020 /* DataArchiveService.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000124 /* DataArchiveService.swift */; };
+		A00000000000000000000021 /* StatsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000125 /* StatsView.swift */; };
+		A00000000000000000000022 /* CompletionStatsServiceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000126 /* CompletionStatsServiceTests.swift */; };
+		A00000000000000000000023 /* DataArchiveServiceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000127 /* DataArchiveServiceTests.swift */; };
+		A00000000000000000000024 /* GoalStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000128 /* GoalStore.swift */; };
+		A00000000000000000000025 /* GoalStoreTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000129 /* GoalStoreTests.swift */; };
+		B00000000000000000000001 /* DayPlanMacApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000000000000000000104 /* DayPlanMacApp.swift */; };
+		B00000000000000000000002 /* DayPlanMacRootView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000000000000000000105 /* DayPlanMacRootView.swift */; };
+		B00000000000000000000003 /* GoalsWorkspaceView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00000000000000000000106 /* GoalsWorkspaceView.swift */; };
+		B00000000000000000000004 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000113 /* Assets.xcassets */; };
+		B00000000000000000000005 /* DayPlanSchema.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000103 /* DayPlanSchema.swift */; };
+		B00000000000000000000006 /* PlannerModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000104 /* PlannerModels.swift */; };
+		B00000000000000000000007 /* DateKeys.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000105 /* DateKeys.swift */; };
+		B00000000000000000000008 /* ChecklistStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000106 /* ChecklistStore.swift */; };
+		B00000000000000000000009 /* ReminderScheduler.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000107 /* ReminderScheduler.swift */; };
+		B0000000000000000000000A /* ContentSourceAdapter.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000108 /* ContentSourceAdapter.swift */; };
+		B0000000000000000000000B /* ContentIngestionService.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000109 /* ContentIngestionService.swift */; };
+		B0000000000000000000000C /* DailyDigestBuilder.swift in Sources */ = {isa = PBXBuildFile; fileRef = A0000000000000000000010A /* DailyDigestBuilder.swift */; };
+		B0000000000000000000000D /* ModelContainerFactory.swift in Sources */ = {isa = PBXBuildFile; fileRef = A0000000000000000000010B /* ModelContainerFactory.swift */; };
+		B0000000000000000000000E /* Formatters.swift in Sources */ = {isa = PBXBuildFile; fileRef = A0000000000000000000010C /* Formatters.swift */; };
+		B0000000000000000000000F /* ByDayView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A0000000000000000000010D /* ByDayView.swift */; };
+		B00000000000000000000010 /* EditChecklistItemView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A0000000000000000000010E /* EditChecklistItemView.swift */; };
+		B00000000000000000000011 /* CollectionsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A0000000000000000000010F /* CollectionsView.swift */; };
+		B00000000000000000000012 /* CollectionDetailView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000110 /* CollectionDetailView.swift */; };
+		B00000000000000000000013 /* YesterdayView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000111 /* YesterdayView.swift */; };
+		B00000000000000000000014 /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000112 /* SettingsView.swift */; };
+		B00000000000000000000015 /* ContentSuggestionService.swift in Sources */ = {isa = PBXBuildFile; fileRef = A0000000000000000000011E /* ContentSuggestionService.swift */; };
+		B00000000000000000000016 /* CompletionStatsService.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000123 /* CompletionStatsService.swift */; };
+		B00000000000000000000017 /* DataArchiveService.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000124 /* DataArchiveService.swift */; };
+		B00000000000000000000018 /* StatsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000125 /* StatsView.swift */; };
+		B00000000000000000000019 /* GoalStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000128 /* GoalStore.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -105,6 +137,18 @@
 		A00000000000000000000120 /* DayPlan.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = DayPlan.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		A00000000000000000000121 /* DayPlanTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = DayPlanTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		A00000000000000000000122 /* DayPlanWidget.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = DayPlanWidget.appex; sourceTree = BUILT_PRODUCTS_DIR; };
+		A00000000000000000000123 /* CompletionStatsService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CompletionStatsService.swift; sourceTree = "<group>"; };
+		A00000000000000000000124 /* DataArchiveService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DataArchiveService.swift; sourceTree = "<group>"; };
+		A00000000000000000000125 /* StatsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StatsView.swift; sourceTree = "<group>"; };
+		A00000000000000000000126 /* CompletionStatsServiceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CompletionStatsServiceTests.swift; sourceTree = "<group>"; };
+		A00000000000000000000127 /* DataArchiveServiceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DataArchiveServiceTests.swift; sourceTree = "<group>"; };
+		A00000000000000000000128 /* GoalStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GoalStore.swift; sourceTree = "<group>"; };
+		A00000000000000000000129 /* GoalStoreTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GoalStoreTests.swift; sourceTree = "<group>"; };
+		B00000000000000000000103 /* DayPlanMac.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = DayPlanMac.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		B00000000000000000000104 /* DayPlanMacApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DayPlanMacApp.swift; sourceTree = "<group>"; };
+		B00000000000000000000105 /* DayPlanMacRootView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DayPlanMacRootView.swift; sourceTree = "<group>"; };
+		B00000000000000000000106 /* GoalsWorkspaceView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GoalsWorkspaceView.swift; sourceTree = "<group>"; };
+		B00000000000000000000107 /* DayPlanMac.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = DayPlanMac.entitlements; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -129,6 +173,13 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		B00000000000000000000070 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXGroup section */
@@ -136,6 +187,7 @@
 			isa = PBXGroup;
 			children = (
 				A00000000000000000000041 /* DayPlan */,
+				B00000000000000000000040 /* DayPlanMac */,
 				A00000000000000000000045 /* DayPlanTests */,
 				A00000000000000000000048 /* DayPlanWidget */,
 				A00000000000000000000049 /* Products */,
@@ -186,6 +238,9 @@
 				A00000000000000000000117 /* WidgetChecklistStore.swift */,
 				A00000000000000000000118 /* WidgetChecklistSync.swift */,
 				A0000000000000000000011E /* ContentSuggestionService.swift */,
+				A00000000000000000000123 /* CompletionStatsService.swift */,
+				A00000000000000000000124 /* DataArchiveService.swift */,
+				A00000000000000000000128 /* GoalStore.swift */,
 			);
 			path = Services;
 			sourceTree = "<group>";
@@ -200,6 +255,7 @@
 				A00000000000000000000110 /* CollectionDetailView.swift */,
 				A00000000000000000000111 /* YesterdayView.swift */,
 				A00000000000000000000112 /* SettingsView.swift */,
+				A00000000000000000000125 /* StatsView.swift */,
 			);
 			path = Views;
 			sourceTree = "<group>";
@@ -220,6 +276,9 @@
 				A00000000000000000000116 /* CollectionTests.swift */,
 				A00000000000000000000119 /* WidgetChecklistStoreTests.swift */,
 				A0000000000000000000011F /* ContentSuggestionServiceTests.swift */,
+				A00000000000000000000126 /* CompletionStatsServiceTests.swift */,
+				A00000000000000000000127 /* DataArchiveServiceTests.swift */,
+				A00000000000000000000129 /* GoalStoreTests.swift */,
 			);
 			path = DayPlanTests;
 			sourceTree = "<group>";
@@ -238,10 +297,38 @@
 			isa = PBXGroup;
 			children = (
 				A00000000000000000000120 /* DayPlan.app */,
+				B00000000000000000000103 /* DayPlanMac.app */,
 				A00000000000000000000121 /* DayPlanTests.xctest */,
 				A00000000000000000000122 /* DayPlanWidget.appex */,
 			);
 			name = Products;
+			sourceTree = "<group>";
+		};
+		B00000000000000000000040 /* DayPlanMac */ = {
+			isa = PBXGroup;
+			children = (
+				B00000000000000000000041 /* App */,
+				B00000000000000000000042 /* Views */,
+				B00000000000000000000107 /* DayPlanMac.entitlements */,
+			);
+			path = DayPlanMac;
+			sourceTree = "<group>";
+		};
+		B00000000000000000000041 /* App */ = {
+			isa = PBXGroup;
+			children = (
+				B00000000000000000000104 /* DayPlanMacApp.swift */,
+			);
+			path = App;
+			sourceTree = "<group>";
+		};
+		B00000000000000000000042 /* Views */ = {
+			isa = PBXGroup;
+			children = (
+				B00000000000000000000105 /* DayPlanMacRootView.swift */,
+				B00000000000000000000106 /* GoalsWorkspaceView.swift */,
+			);
+			path = Views;
 			sourceTree = "<group>";
 		};
 /* End PBXGroup section */
@@ -264,6 +351,23 @@
 			name = DayPlan;
 			productName = DayPlan;
 			productReference = A00000000000000000000120 /* DayPlan.app */;
+			productType = "com.apple.product-type.application";
+		};
+		B00000000000000000000060 /* DayPlanMac */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = B00000000000000000000090 /* Build configuration list for PBXNativeTarget "DayPlanMac" */;
+			buildPhases = (
+				B00000000000000000000072 /* Sources */,
+				B00000000000000000000070 /* Frameworks */,
+				B00000000000000000000073 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = DayPlanMac;
+			productName = DayPlanMac;
+			productReference = B00000000000000000000103 /* DayPlanMac.app */;
 			productType = "com.apple.product-type.application";
 		};
 		A00000000000000000000061 /* DayPlanTests */ = {
@@ -319,6 +423,9 @@
 							};
 						};
 					};
+					B00000000000000000000060 = {
+						CreatedOnToolsVersion = 15.0;
+					};
 					A00000000000000000000061 = {
 						CreatedOnToolsVersion = 15.0;
 						TestTargetID = A00000000000000000000060;
@@ -347,6 +454,7 @@
 			projectRoot = "";
 			targets = (
 				A00000000000000000000060 /* DayPlan */,
+				B00000000000000000000060 /* DayPlanMac */,
 				A00000000000000000000061 /* DayPlanTests */,
 				A00000000000000000000062 /* DayPlanWidget */,
 			);
@@ -373,6 +481,14 @@
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		B00000000000000000000073 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				B00000000000000000000004 /* Assets.xcassets in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -404,6 +520,10 @@
 				A00000000000000000000017 /* WidgetChecklistStore.swift in Sources */,
 				A00000000000000000000018 /* WidgetChecklistSync.swift in Sources */,
 				A0000000000000000000001D /* ContentSuggestionService.swift in Sources */,
+				A0000000000000000000001F /* CompletionStatsService.swift in Sources */,
+				A00000000000000000000020 /* DataArchiveService.swift in Sources */,
+				A00000000000000000000021 /* StatsView.swift in Sources */,
+				A00000000000000000000024 /* GoalStore.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -416,6 +536,9 @@
 				A00000000000000000000016 /* CollectionTests.swift in Sources */,
 				A00000000000000000000019 /* WidgetChecklistStoreTests.swift in Sources */,
 				A0000000000000000000001E /* ContentSuggestionServiceTests.swift in Sources */,
+				A00000000000000000000022 /* CompletionStatsServiceTests.swift in Sources */,
+				A00000000000000000000023 /* DataArchiveServiceTests.swift in Sources */,
+				A00000000000000000000025 /* GoalStoreTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -425,6 +548,37 @@
 			files = (
 				A0000000000000000000001A /* DayPlanChecklistWidget.swift in Sources */,
 				A0000000000000000000001B /* WidgetChecklistStore.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		B00000000000000000000072 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				B00000000000000000000001 /* DayPlanMacApp.swift in Sources */,
+				B00000000000000000000002 /* DayPlanMacRootView.swift in Sources */,
+				B00000000000000000000003 /* GoalsWorkspaceView.swift in Sources */,
+				B00000000000000000000005 /* DayPlanSchema.swift in Sources */,
+				B00000000000000000000006 /* PlannerModels.swift in Sources */,
+				B00000000000000000000007 /* DateKeys.swift in Sources */,
+				B00000000000000000000008 /* ChecklistStore.swift in Sources */,
+				B00000000000000000000009 /* ReminderScheduler.swift in Sources */,
+				B0000000000000000000000A /* ContentSourceAdapter.swift in Sources */,
+				B0000000000000000000000B /* ContentIngestionService.swift in Sources */,
+				B0000000000000000000000C /* DailyDigestBuilder.swift in Sources */,
+				B0000000000000000000000D /* ModelContainerFactory.swift in Sources */,
+				B0000000000000000000000E /* Formatters.swift in Sources */,
+				B0000000000000000000000F /* ByDayView.swift in Sources */,
+				B00000000000000000000010 /* EditChecklistItemView.swift in Sources */,
+				B00000000000000000000011 /* CollectionsView.swift in Sources */,
+				B00000000000000000000012 /* CollectionDetailView.swift in Sources */,
+				B00000000000000000000013 /* YesterdayView.swift in Sources */,
+				B00000000000000000000014 /* SettingsView.swift in Sources */,
+				B00000000000000000000015 /* ContentSuggestionService.swift in Sources */,
+				B00000000000000000000016 /* CompletionStatsService.swift in Sources */,
+				B00000000000000000000017 /* DataArchiveService.swift in Sources */,
+				B00000000000000000000018 /* StatsView.swift in Sources */,
+				B00000000000000000000019 /* GoalStore.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -706,6 +860,52 @@
 			};
 			name = Release;
 		};
+		B000000000000000000000A0 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_ENTITLEMENTS = DayPlanMac/DayPlanMac.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = "";
+				ENABLE_HARDENED_RUNTIME = YES;
+				ENABLE_USER_SELECTED_FILES = readwrite;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_CFBundleDisplayName = DayPlan;
+				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.productivity";
+				MACOSX_DEPLOYMENT_TARGET = 14.0;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.jakemauldin.DayPlanMac;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = macosx;
+				SUPPORTED_PLATFORMS = macosx;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_VERSION = 5.0;
+			};
+			name = Debug;
+		};
+		B000000000000000000000A1 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_ENTITLEMENTS = DayPlanMac/DayPlanMac.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = "";
+				ENABLE_HARDENED_RUNTIME = YES;
+				ENABLE_USER_SELECTED_FILES = readwrite;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_CFBundleDisplayName = DayPlan;
+				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.productivity";
+				MACOSX_DEPLOYMENT_TARGET = 14.0;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.jakemauldin.DayPlanMac;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = macosx;
+				SUPPORTED_PLATFORMS = macosx;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_VERSION = 5.0;
+			};
+			name = Release;
+		};
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
@@ -741,6 +941,15 @@
 			buildConfigurations = (
 				A000000000000000000000A6 /* Debug */,
 				A000000000000000000000A7 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		B00000000000000000000090 /* Build configuration list for PBXNativeTarget "DayPlanMac" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				B000000000000000000000A0 /* Debug */,
+				B000000000000000000000A1 /* Release */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;

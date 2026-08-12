@@ -55,6 +55,13 @@ enum WidgetChecklistSync {
 
         if let checklist = try context.fetch(descriptor).first {
             publish(checklist, defaults: defaults, reloadWidgets: reloadWidgets)
+        } else {
+            let snapshot = WidgetChecklistSnapshot(
+                dayKey: DateKeys.dayKey(for: today),
+                generatedAt: .now,
+                items: []
+            )
+            WidgetChecklistStore.save(snapshot, defaults: defaults, reloadWidgets: reloadWidgets)
         }
     }
 

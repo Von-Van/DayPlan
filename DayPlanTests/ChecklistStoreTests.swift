@@ -66,6 +66,48 @@ final class ChecklistStoreTests: XCTestCase {
         XCTAssertFalse(item.isPersistent)
     }
 
+    func testPersistentItemsPreserveGoalButNotGoalActionInFutureCopies() throws {
+        let goal = Goal(title: "Health")
+        let action = GoalAction(title: "Walk outside", goal: goal)
+        goal.actions.append(action)
+        context.insert(goal)
+        context.insert(action)
+        try context.save()
+
+        let checklist = try XCTUnwrap(ChecklistStore.checklist(for: .now, in: context))
+        let item = try ChecklistStore.addItem(
+            title: "Walk outside",
+            goalID: goal.id,
+            goalActionID: action.id,
+            to: checklist,
+            in: context
+        )
+
+        try ChecklistStore.setPersistence(for: item, isPersistent: true, in: context)
+
+        let tomorrow = try XCTUnwrap(ChecklistStore.checklist(for: DateKeys.dayAfter(.now), in: context))
+        let futureItem = try XCTUnwrap(tomorrow.items.first)
+        XCTAssertEqual(futureItem.goalID, goal.id)
+        XCTAssertNil(futureItem.goalActionID)
+    }
+
+    func testScheduledGoalActionsAreSingleShotDailyItems() throws {
+        let goal = Goal(title: "Launch")
+        let action = GoalAction(title: "Send build", goal: goal)
+        goal.actions.append(action)
+        context.insert(goal)
+        context.insert(action)
+        try context.save()
+
+        let todayItem = try GoalStore.schedule(action, for: .now, in: context)
+        let tomorrow = try XCTUnwrap(ChecklistStore.checklist(for: DateKeys.dayAfter(.now), in: context))
+
+        XCTAssertFalse(todayItem.isPersistent)
+        XCTAssertEqual(todayItem.goalID, goal.id)
+        XCTAssertEqual(todayItem.goalActionID, action.id)
+        XCTAssertTrue(tomorrow.items.isEmpty)
+    }
+
     func testReminderIdentifierIsStable() {
         let itemID = UUID(uuidString: "11111111-1111-1111-1111-111111111111")!
         let date = Calendar.current.date(from: DateComponents(year: 2026, month: 6, day: 3))!
