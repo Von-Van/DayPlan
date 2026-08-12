@@ -1,6 +1,6 @@
 # Contributing
 
-Thanks for your interest. This repository is a **portfolio preview** and intentionally incomplete. Contributions should prioritize clarity, readability, and presentability rather than feature completeness.
+Thanks for your interest. This repository is a **portfolio preview** and intentionally focused. Contributions should prioritize clarity, safety, and presentability rather than feature count.
 
 ## Guidelines
 
@@ -11,7 +11,7 @@ Thanks for your interest. This repository is a **portfolio preview** and intenti
 
 ## Development
 
-- Xcode 15 or newer
-- iOS 17 or newer
-- Open `DayPlan.xcodeproj` and run the `DayPlan` scheme
-- Run tests with `xcodebuild -project DayPlan.xcodeproj -scheme DayPlan -destination 'platform=iOS Simulator,name=iPhone 17' test`
+- Node.js 24 or newer
+- A current Rust toolchain
+- Ollama with `qwen3:8b` only when exercising the live evaluation harness
+- Run `npm install`, `npm test`, `npm run build`, and `cargo test --manifest-path src-tauri/Cargo.toml`

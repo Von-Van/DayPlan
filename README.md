@@ -1,85 +1,99 @@
-# DayPlan iOS
+# DayPlan — Local AI Desktop Planner
 
-Native SwiftUI rewrite of DayPlan for iPhone.
+DayPlan is a deliberately small, local-first day planner for macOS and Windows. It pairs a timed agenda and daily task list with an AI command bar that turns natural language into a reviewed, typed schedule proposal.
 
-This app is intentionally local-first. Planner data, collection data, reminder
-settings, and content digests are stored on-device with SwiftData. There is no
-Flask backend, account system, cloud sync, or server dependency.
+> “Move gym to 6pm tomorrow, add dentist Thursday at 2pm, push everything after lunch back 30 minutes.”
 
-The previous Flask desktop prototype is preserved on the
-`codex/legacy-dayplan-desktop` branch.
+The interesting part is not the chat box: the model never receives database access and cannot write planner data. It can only propose one of four strict operations, which DayPlan validates before showing a confirmation preview. No proposal changes data until the person using the app selects **Apply**.
 
-## App Shape
+## Portfolio architecture
 
-- By Day: daily checklist with historical calendar selection.
-- Collections: non-date-bound task lists.
-- Yesterday: local content digest fed by explicit source adapters.
-- Settings: notification permission, source toggles, and future data tools.
+```mermaid
+flowchart LR
+  U["React desktop UI"] -->|"Natural-language command"| A["Rust PlannerAgent"]
+  A -->|"One strict tool schema"| O["Ollama + qwen3:8b\nlocalhost only"]
+  O -->|"Typed proposal or clarification"| V["Zod + Serde validation"]
+  V -->|"Preview; user confirms"| T["Single SQLite transaction"]
+  T --> D["Local agenda & task database"]
+  D --> U
+```
 
-## Checklist Widget
+- **Tauri 2 + React + TypeScript** provides one installable desktop app for macOS and Windows.
+- **SQLite** stores `ScheduleEvent` records (`id`, title, notes, UTC start, IANA time zone, duration, revision/audit timestamps) and separate `DailyTask` records.
+- **Rust repositories** own all reads and writes, preserving the original DayPlan separation of typed models → store/service layer → views.
+- **Ollama** runs the selected model at `http://127.0.0.1:11434`. DayPlan is local-only: it has no API key setting, cloud provider, backend, account, or silent fallback.
 
-DayPlan includes an interactive checklist widget for the iPhone Lock Screen and
-Home Screen. Opening today's checklist publishes a minimal snapshot containing
-task titles, completion state, and reminder identifiers to a private App Group.
-The widget never receives notes, collections, Yesterday content, or the main
-SwiftData store.
+The previous SwiftUI / SwiftData / WidgetKit implementation is preserved on the [`ios-swiftui`](https://github.com/Von-Van/DayPlan/tree/ios-swiftui) branch. The desktop build intentionally starts with a fresh local database; it does not import or sync iOS data.
 
-Checking an item in the widget updates the widget immediately and stores a
-bounded mutation queue. DayPlan reconciles those changes into completion history
-when the app next becomes active. iOS requires authentication before interactive
-Lock Screen widget actions run on a locked device.
+## AI safety boundary
 
-Both the `DayPlan` and `DayPlanWidget` targets must use the
-`group.com.jakemauldin.DayPlan` App Group in Signing & Capabilities.
+`PlannerAgent` sends only the command, the selected date/time zone, a bounded set of event identifiers/titles/times/revisions, and the last four in-memory session turns. Event notes are not sent as schedule context. Conversation memory lives only in the running app and can be cleared with one click.
 
-## Yesterday Sources
+The only permitted output operations are:
 
-Add RSS or Atom feeds from Settings to fill Yesterday with real content. Each
-source can be enabled independently and configured with:
+| Operation | Allowed fields |
+| --- | --- |
+| `create_event` | title, notes, UTC start, IANA time zone, duration |
+| `update_event` | event ID + revision, title, notes, duration |
+| `delete_event` | event ID + revision |
+| `reschedule_event` | event ID + revision, UTC start, IANA time zone, optional duration |
 
-- A category used in the daily digest.
-- Optional comma-separated include and exclude keywords.
-- A per-refresh item limit.
+The tool schema rejects extra fields; the React boundary validates the returned response with strict Zod schemas; Rust deserializes it with `deny_unknown_fields`; and the repository revalidates titles, time zones, timestamps, duration, IDs, revisions, and live references before its transaction starts. A stale or malformed proposal rolls back in full.
 
-Refreshing Yesterday fetches every enabled source, applies its filters, and
-rebuilds the deterministic local summary. A failing source does not block the
-others.
+Ambiguous titles, a bare 12-hour time such as `at 2`, missing targets/dates, unsupported recurring-event requests, and task-completion requests generate a clarification instead of a guess. Compound instructions are all-or-nothing: DayPlan never applies just the “safe” half.
 
-## Suggested Items
+## Local model setup
 
-When viewing today in By Day, DayPlan deterministically selects one
-high-priority follow-up from locally stored Yesterday content. Accepting adds a
-non-persistent, reminder-free checklist item with source context; dismissing
-permanently excludes that source event. Decisions and scoring remain on-device,
-and no content is sent to a cloud AI service.
+1. Install [Ollama](https://ollama.com/download) for macOS or Windows.
+2. In a terminal, download the local model once:
 
-## Notification Scope
+   ```bash
+   ollama pull qwen3:8b
+   ```
 
-iOS apps can schedule and manage their own notifications. They cannot read all
-notifications from other apps in Notification Center through public APIs. The
-Yesterday tab therefore uses an adapter-based local inbox, with a sample adapter
-included for v1 until specific real sources are chosen.
+3. Launch DayPlan. The Local Planner card confirms whether Ollama and `qwen3:8b` are ready.
 
-## Feed Security
+`qwen3:8b` is about 5.2 GB. Local execution eliminates per-command API cost and keeps planner data on the device, but the first download, memory use, and latency depend on the machine. The app never sends your planner context to a hosted model. [Ollama quickstart](https://docs.ollama.com/quickstart) · [Qwen3 model details](https://ollama.com/library/qwen3%3A8b)
 
-- Feed URLs must use public HTTPS hosts and cannot contain credentials.
-- Redirect destinations are checked with the same URL policy.
-- Feed downloads use an ephemeral, cookie-free URL session and stop at 2 MB.
-- XML external-entity resolution is disabled.
-- Feed HTML is reduced to bounded plain text before it is stored.
-- Content remains on-device and links open externally.
+## Development
 
-## Requirements
-
-- Xcode 15 or newer
-- iOS 17 or newer
-- SwiftData
-
-Open `DayPlan.xcodeproj` in Xcode and run the `DayPlan` scheme on an iPhone
-simulator or device.
-
-## Command Line Checks
+Install Node.js 24+ and a current Rust toolchain, then:
 
 ```bash
-xcodebuild -project DayPlan.xcodeproj -scheme DayPlan -destination 'platform=iOS Simulator,name=iPhone 17' test
+npm install
+npm run tauri dev
 ```
+
+Useful checks:
+
+```bash
+npm test
+npm run build
+cargo test --manifest-path src-tauri/Cargo.toml
+```
+
+The GitHub Actions workflow runs the frontend tests, Rust tests, and a Tauri bundle on both macOS and Windows.
+
+## Evaluation harness
+
+[`eval/cases.json`](eval/cases.json) contains 24 hand-labeled natural-language cases: creates, edits, deletes, reschedules, compound changes, bulk shifts, vague time/date cases, duplicate matches, unsupported requests, and a conversational-reference negative case. Expected event references are human-readable fixture titles; the evaluator maps the production model’s returned IDs back to those titles before scoring.
+
+Run the same `PlannerAgent` path used by the app—not a mocked parser—with:
+
+```bash
+npm run eval
+```
+
+It reports:
+
+- schema-valid response rate;
+- exact proposal accuracy; and
+- field-level operation accuracy, followed by per-case failures.
+
+### Baseline
+
+Baseline evaluation is intentionally model- and machine-specific. The harness was executed in this workspace on August 12, 2026, but no valid model baseline could be recorded: Ollama was unavailable, and two attempts to download the runtime failed with the upstream GitHub release returning HTTP 503. The evaluator now fails before scoring when Ollama or `qwen3:8b` is absent, so it cannot misleadingly report an availability failure as model quality. Run `ollama pull qwen3:8b` followed by `npm run eval` on the target desktop and record its output in this section before presenting the build. Subsequent prompt/model changes should be compared against that number rather than judged from a few hand-picked examples.
+
+## Scope
+
+This focused desktop portfolio version includes a daily agenda, daily tasks, manual event CRUD, offline persistence, and the reviewed local AI planner. Recurrence, notifications, cloud sync, accounts, iOS widgets, goals, collections, RSS content, data migration, and collaboration are out of scope by design.

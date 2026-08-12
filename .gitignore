@@ -1,4 +1,4 @@
-# Xcode
+# Xcode (kept because `ios-swiftui` preserves the native version)
 DerivedData/
 build/
 *.xcuserstate
@@ -7,10 +7,15 @@ xcuserdata/
 *.xcscmblueprint
 *.xccheckout
 
-# Swift Package Manager
+# Swift / Rust / Node build output
 .build/
 .swiftpm/
 Package.resolved
+node_modules/
+dist/
+src-tauri/target/
+src-tauri/gen/
+coverage/
 
 # App data and logs
 .env
@@ -19,14 +24,15 @@ logs/
 backups/
 docs/
 *.log
+*.db
+*.db-shm
+*.db-wal
 
-# Editors
+# Editors / OS
 .idea/
 .vscode/
 *.swp
 *.swo
 *~
-
-# OS
 .DS_Store
 Thumbs.db

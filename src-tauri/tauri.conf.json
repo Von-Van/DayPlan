@@ -1,0 +1,27 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "DayPlan",
+  "version": "0.1.0",
+  "identifier": "com.vonvan.dayplan.desktop",
+  "build": {
+    "beforeDevCommand": "npm run dev",
+    "devUrl": "http://localhost:1420",
+    "beforeBuildCommand": "npm run build",
+    "frontendDist": "../dist"
+  },
+  "app": {
+    "windows": [
+      {
+        "title": "DayPlan",
+        "width": 1240,
+        "height": 820,
+        "minWidth": 940,
+        "minHeight": 660
+      }
+    ],
+    "security": {
+      "csp": "default-src 'self'; img-src 'self' asset: data:; style-src 'self' 'unsafe-inline'; connect-src 'self' http://127.0.0.1:11434 http://localhost:11434"
+    }
+  },
+  "bundle": { "active": true, "targets": "all", "category": "Productivity" }
+}
