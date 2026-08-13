@@ -2,29 +2,72 @@ name: Desktop CI
 
 on:
   push:
-    branches: [main]
+    branches: [main, "agent/**"]
   pull_request:
 
+permissions:
+  contents: read
+
 jobs:
-  test-and-build:
+  validate:
+    name: Validate
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: 1.97.1
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+      - run: npm ci
+      - run: npm run version:check
+      - run: npm run format:check
+      - run: npm test
+      - run: npm run build
+      - run: cargo fmt --manifest-path src-tauri/Cargo.toml --check
+      - run: cargo test --manifest-path src-tauri/Cargo.toml
+      - run: cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings
+      - name: Production npm audit
+        run: npm audit --omit=dev --audit-level=high
+      - name: Install Rust audit tools
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-audit,cargo-deny
+      - run: cargo audit --file src-tauri/Cargo.lock
+      - run: cargo deny --manifest-path src-tauri/Cargo.toml check advisories licenses sources
+
+  unsigned-bundle:
+    name: Unsigned ${{ matrix.label }} bundle
     strategy:
       fail-fast: false
       matrix:
-        os: [macos-latest, windows-latest]
+        include:
+          - os: macos-14
+            label: macOS arm64
+            bundles: app
+          - os: windows-2022
+            label: Windows x64
+            bundles: nsis
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: 24
+          node-version-file: .nvmrc
           cache: npm
-      - uses: dtolnay/rust-toolchain@stable
-      - name: Install frontend dependencies
-        run: npm ci
-      - name: Frontend tests
-        run: npm test
-      - name: Rust tests
-        run: cargo test --manifest-path src-tauri/Cargo.toml
-      - name: Tauri bundle
-        run: npm run tauri build -- --bundles ${{ matrix.os == 'macos-latest' && 'dmg' || 'msi' }}
-
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: 1.97.1
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+      - run: npm ci
+      - run: npm run tauri build -- --bundles ${{ matrix.bundles }} --config src-tauri/tauri.ci.conf.json
+        env:
+          DAYPLAN_UPDATER_PUBKEY: ${{ vars.TAURI_UPDATER_PUBKEY }}

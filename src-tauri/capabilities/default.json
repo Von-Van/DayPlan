@@ -3,5 +3,20 @@
   "identifier": "default",
   "description": "Capabilities for the DayPlan desktop window.",
   "windows": ["main"],
-  "permissions": ["core:default", "opener:default", "notification:default"]
+  "permissions": [
+    "core:default",
+    {
+      "identifier": "opener:allow-open-url",
+      "allow": [
+        { "url": "https://ollama.com/download*" },
+        { "url": "https://ollama.com/library/qwen3:8b*" },
+        { "url": "https://docs.ollama.com/*" },
+        { "url": "https://github.com/Von-Van/DayPlan/releases*" }
+      ]
+    },
+    "notification:default",
+    "updater:allow-check",
+    "updater:allow-download-and-install",
+    "process:allow-restart"
+  ]
 }

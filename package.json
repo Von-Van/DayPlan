@@ -2,19 +2,26 @@
   "name": "dayplan-desktop",
   "private": true,
   "version": "0.1.0",
+  "packageManager": "npm@11.12.1",
   "type": "module",
   "scripts": {
     "dev": "vite",
     "build": "tsc --noEmit && vite build",
+    "format": "prettier --write src .github README.md CONTRIBUTING.md RELEASE_CHECKLIST.md package.json",
+    "format:check": "prettier --check src .github README.md CONTRIBUTING.md RELEASE_CHECKLIST.md package.json",
     "test": "vitest run",
     "test:watch": "vitest",
     "tauri": "tauri",
-    "eval": "cargo run --manifest-path src-tauri/Cargo.toml --example eval_agent -- --fixtures eval/cases.json --runs 3 --json-output eval/results/latest.json"
+    "eval": "cargo run --manifest-path src-tauri/Cargo.toml --example eval_agent -- --fixtures eval/cases.json --runs 3 --json-output eval/results/latest.json",
+    "version:check": "node scripts/check-versions.mjs"
   },
   "dependencies": {
     "@tauri-apps/api": "^2.0.0",
+    "@tauri-apps/plugin-dialog": "^2.7.2",
     "@tauri-apps/plugin-notification": "^2.3.3",
     "@tauri-apps/plugin-opener": "^2.0.0",
+    "@tauri-apps/plugin-process": "^2.3.1",
+    "@tauri-apps/plugin-updater": "^2.10.1",
     "@vitejs/plugin-react": "^4.3.4",
     "date-fns": "^4.1.0",
     "lucide-react": "^0.468.0",
@@ -26,6 +33,7 @@
     "@tauri-apps/cli": "^2.0.0",
     "@types/react": "^18.3.18",
     "@types/react-dom": "^18.3.5",
+    "prettier": "^3.9.6",
     "typescript": "^5.7.2",
     "vite": "^6.0.5",
     "vitest": "^2.1.8"
