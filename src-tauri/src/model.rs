@@ -4,6 +4,7 @@ pub const MAX_TITLE_LENGTH: usize = 140;
 pub const MAX_NOTES_LENGTH: usize = 800;
 pub const MAX_COMMAND_LENGTH: usize = 1_000;
 pub const MAX_OPERATIONS: usize = 12;
+pub const MAX_REMINDER_MINUTES: i64 = 7 * 24 * 60;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -14,6 +15,10 @@ pub struct ScheduleEvent {
     pub start_at_utc: String,
     pub time_zone: String,
     pub duration_minutes: i64,
+    #[serde(default)]
+    pub reminder_minutes_before: Option<i64>,
+    #[serde(default)]
+    pub reminder_status: ReminderStatus,
     pub revision: i64,
     pub created_at: String,
     pub updated_at: String,
@@ -41,6 +46,8 @@ pub struct CreateEventInput {
     pub start_at_utc: String,
     pub time_zone: String,
     pub duration_minutes: i64,
+    #[serde(default)]
+    pub reminder_minutes_before: Option<i64>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -53,6 +60,8 @@ pub struct UpdateEventInput {
     pub start_at_utc: Option<String>,
     pub time_zone: Option<String>,
     pub duration_minutes: Option<i64>,
+    #[serde(default)]
+    pub reminder_change: ReminderChange,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -63,6 +72,8 @@ pub struct RescheduleEventInput {
     pub start_at_utc: String,
     pub time_zone: String,
     pub duration_minutes: i64,
+    #[serde(default)]
+    pub reminder_change: ReminderChange,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -143,6 +154,30 @@ pub struct DatabaseStatus {
     pub backups: Vec<BackupInfo>,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[serde(tag = "action", rename_all = "snake_case", deny_unknown_fields)]
+pub enum ReminderChange {
+    #[default]
+    Unchanged,
+    Clear,
+    Set {
+        #[serde(rename = "minutesBefore")]
+        minutes_before: i64,
+    },
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum ReminderStatus {
+    #[default]
+    None,
+    Pending,
+    Scheduled,
+    NeedsPermission,
+    Error,
+    Expired,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(
     tag = "type",
@@ -157,6 +192,7 @@ pub enum MutationOperation {
         start_at_utc: String,
         time_zone: String,
         duration_minutes: i64,
+        reminder_minutes_before: Option<i64>,
     },
     UpdateEvent {
         event_id: String,
@@ -164,6 +200,7 @@ pub enum MutationOperation {
         title: Option<String>,
         notes: Option<String>,
         duration_minutes: Option<i64>,
+        reminder_change: ReminderChange,
     },
     DeleteEvent {
         event_id: String,
@@ -177,6 +214,7 @@ pub enum MutationOperation {
         start_at_utc: String,
         time_zone: String,
         duration_minutes: Option<i64>,
+        reminder_change: ReminderChange,
     },
 }
 

@@ -42,3 +42,10 @@ button:disabled { cursor: not-allowed; opacity: .5; }
 .time-resolution { margin: -4px 0 15px; padding: 10px; border: 1px solid #d7b66e; border-radius: 4px; background: #fff7de; color: #674f23; font-size: 11px; line-height: 1.4; }.time-resolution p { margin: 3px 0 8px; }.time-resolution button { margin-right: 7px; border: 1px solid #bea05e; border-radius: 4px; background: #fffdf5; color: #4a3a1a; padding: 6px 8px; font-size: 11px; }
 .spin { animation: spin .8s linear infinite; } @keyframes spin { to { transform: rotate(360deg); } }
 @media (max-width: 1100px) { .workspace { padding: 30px; }.content-grid { grid-template-columns: minmax(440px, 1fr) 330px; gap: 22px; } }
+
+.event-main .reminder-badge { display: inline-flex; align-items: center; gap: 4px; color: #6d7f73; text-transform: capitalize; }
+.event-main .reminder-badge.error, .event-main .reminder-badge.needs_permission { color: #a24f39; }
+.event-main .reminder-badge.pending { color: #9b7537; }
+.event-editor { max-height: calc(100vh - 40px); overflow-y: auto; }
+.event-editor select { width: 100%; border: 1px solid #d7d7ce; border-radius: 4px; outline: 0; background: #fffdfa; color: #21372d; padding: 9px; font-size: 13px; font-weight: 400; }
+.event-editor select:focus { border-color: #638071; box-shadow: 0 0 0 2px rgba(99,128,113,.13); }

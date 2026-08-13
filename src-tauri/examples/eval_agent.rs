@@ -1,7 +1,9 @@
 use chrono::{SecondsFormat, Utc};
 use dayplan_desktop::agent::{ollama_status, PlannerAgent};
 use dayplan_desktop::db::PlannerDatabase;
-use dayplan_desktop::model::{CreateEventInput, MutationOperation, PlannerResponse};
+use dayplan_desktop::model::{
+    CreateEventInput, MutationOperation, PlannerResponse, ReminderChange,
+};
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -33,6 +35,8 @@ struct FixtureEvent {
     start_at_utc: String,
     time_zone: String,
     duration_minutes: i64,
+    #[serde(default)]
+    reminder_minutes_before: Option<i64>,
 }
 
 #[derive(Deserialize)]
@@ -56,6 +60,8 @@ enum ExpectedOperation {
         start_at_utc: String,
         time_zone: String,
         duration_minutes: i64,
+        #[serde(default)]
+        reminder_minutes_before: Option<i64>,
     },
     #[serde(rename = "update_event")]
     Update {
@@ -63,6 +69,8 @@ enum ExpectedOperation {
         title: Option<String>,
         notes: Option<String>,
         duration_minutes: Option<i64>,
+        #[serde(default)]
+        reminder_change: Option<ReminderChange>,
     },
     #[serde(rename = "delete_event")]
     Delete { event_title: String },
@@ -74,6 +82,8 @@ enum ExpectedOperation {
         start_at_utc: String,
         time_zone: String,
         duration_minutes: Option<i64>,
+        #[serde(default)]
+        reminder_change: Option<ReminderChange>,
     },
 }
 
@@ -224,6 +234,7 @@ async fn evaluate_run(run: usize, cases: &[EvalCase]) -> RunReport {
                     start_at_utc: event.start_at_utc.clone(),
                     time_zone: event.time_zone.clone(),
                     duration_minutes: event.duration_minutes,
+                    reminder_minutes_before: event.reminder_minutes_before,
                 })
                 .expect("valid fixture event");
             titles_by_id.insert(created.id, created.title);
@@ -397,6 +408,7 @@ fn score_operation(
                 start_at_utc,
                 time_zone,
                 duration_minutes,
+                reminder_minutes_before,
             },
             MutationOperation::CreateEvent {
                 title: a_title,
@@ -404,6 +416,7 @@ fn score_operation(
                 start_at_utc: a_start,
                 time_zone: a_zone,
                 duration_minutes: a_duration,
+                reminder_minutes_before: a_reminder,
             },
         ) => {
             fields.extend([
@@ -412,6 +425,7 @@ fn score_operation(
                 start_at_utc == a_start,
                 time_zone == a_zone,
                 duration_minutes == a_duration,
+                reminder_minutes_before == a_reminder,
             ]);
         }
         (
@@ -420,6 +434,7 @@ fn score_operation(
                 title,
                 notes,
                 duration_minutes,
+                reminder_change,
             },
             MutationOperation::UpdateEvent {
                 event_id,
@@ -439,6 +454,15 @@ fn score_operation(
             if let Some(value) = duration_minutes {
                 fields.push(Some(value) == a_duration.as_ref());
             }
+            if let Some(value) = reminder_change {
+                if let MutationOperation::UpdateEvent {
+                    reminder_change: actual,
+                    ..
+                } = actual
+                {
+                    fields.push(value == actual);
+                }
+            }
         }
         (
             ExpectedOperation::Delete { event_title },
@@ -452,6 +476,7 @@ fn score_operation(
                 start_at_utc,
                 time_zone,
                 duration_minutes,
+                reminder_change,
             },
             MutationOperation::RescheduleEvent {
                 event_id,
@@ -477,6 +502,15 @@ fn score_operation(
             if let Some(value) = duration_minutes {
                 fields.push(Some(value) == a_duration.as_ref());
             }
+            if let Some(value) = reminder_change {
+                if let MutationOperation::RescheduleEvent {
+                    reminder_change: actual,
+                    ..
+                } = actual
+                {
+                    fields.push(value == actual);
+                }
+            }
         }
         _ => return (false, 0, expected_operation_field_count(expected)),
     }
@@ -499,20 +533,32 @@ fn expected_field_count(expected: &ExpectedResponse) -> usize {
 
 fn expected_operation_field_count(operation: &ExpectedOperation) -> usize {
     match operation {
-        ExpectedOperation::Create { .. } => 5,
+        ExpectedOperation::Create { .. } => 6,
         ExpectedOperation::Update {
             title,
             notes,
             duration_minutes,
+            reminder_change,
             ..
-        } => 1 + title.iter().count() + notes.iter().count() + duration_minutes.iter().count(),
+        } => {
+            1 + title.iter().count()
+                + notes.iter().count()
+                + duration_minutes.iter().count()
+                + reminder_change.iter().count()
+        }
         ExpectedOperation::Delete { .. } => 1,
         ExpectedOperation::Reschedule {
             title,
             notes,
             duration_minutes,
+            reminder_change,
             ..
-        } => 3 + title.iter().count() + notes.iter().count() + duration_minutes.iter().count(),
+        } => {
+            3 + title.iter().count()
+                + notes.iter().count()
+                + duration_minutes.iter().count()
+                + reminder_change.iter().count()
+        }
     }
 }
 

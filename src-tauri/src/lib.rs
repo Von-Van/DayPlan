@@ -4,7 +4,7 @@ pub mod error;
 pub mod model;
 
 use agent::{OllamaStatus, PlannerAgent};
-use db::{backups_for_path, restore_backup, PlannerDatabase, CURRENT_SCHEMA_VERSION};
+use db::{backups_for_path, restore_backup, DueReminder, PlannerDatabase, CURRENT_SCHEMA_VERSION};
 use error::{AppError, CommandError};
 use model::{
     CreateEventInput, CreateTaskInput, DailyTask, DatabaseStatus, ExportBundle, ImportPreview,
@@ -15,7 +15,11 @@ use serde::Serialize;
 use std::fs;
 use std::path::PathBuf;
 use std::sync::Mutex;
-use tauri::{Manager, State};
+use std::time::Duration;
+use tauri::menu::{Menu, MenuItem};
+use tauri::tray::TrayIconBuilder;
+use tauri::{AppHandle, Manager, State};
+use tauri_plugin_notification::NotificationExt;
 
 struct AppState {
     database: Mutex<DatabaseRuntime>,
@@ -274,9 +278,101 @@ fn cancel_planner_request(state: State<'_, AppState>) {
     state.agent.cancel_current();
 }
 
+async fn reminder_worker(app: AppHandle) {
+    let mut interval = tokio::time::interval(Duration::from_secs(15));
+    loop {
+        interval.tick().await;
+        let due = {
+            let state = app.state::<AppState>();
+            let Ok(mut runtime) = state.database.lock() else {
+                continue;
+            };
+            let Some(database) = runtime.database.as_mut() else {
+                continue;
+            };
+            if database.reconcile_reminders().is_err() {
+                continue;
+            }
+            database.due_reminders(25).unwrap_or_default()
+        };
+
+        for reminder in due {
+            let delivered = app
+                .notification()
+                .builder()
+                .title(&reminder.title)
+                .body(reminder_body(&reminder))
+                .show()
+                .is_ok();
+            let state = app.state::<AppState>();
+            let Ok(mut runtime) = state.database.lock() else {
+                continue;
+            };
+            let Some(database) = runtime.database.as_mut() else {
+                continue;
+            };
+            if delivered {
+                let _ = database.mark_reminder_delivered(&reminder);
+            } else {
+                let _ = database.mark_reminder_error(&reminder, "notification_delivery_failed");
+            }
+        }
+    }
+}
+
+fn reminder_body(reminder: &DueReminder) -> String {
+    let formatted = chrono::DateTime::parse_from_rfc3339(&reminder.start_at_utc)
+        .ok()
+        .and_then(|start| {
+            reminder
+                .time_zone
+                .parse::<chrono_tz::Tz>()
+                .ok()
+                .map(|zone| {
+                    start
+                        .with_timezone(&zone)
+                        .format("%A at %-I:%M %p")
+                        .to_string()
+                })
+        })
+        .unwrap_or_else(|| reminder.start_at_utc.clone());
+    format!("Starts {formatted}")
+}
+
+fn install_tray(app: &tauri::App) -> tauri::Result<()> {
+    let show = MenuItem::with_id(app, "show", "Show DayPlan", true, None::<&str>)?;
+    let quit = MenuItem::with_id(app, "quit", "Quit DayPlan", true, None::<&str>)?;
+    let menu = Menu::with_items(app, &[&show, &quit])?;
+    let mut tray = TrayIconBuilder::new()
+        .tooltip("DayPlan — reminders stay active while this icon is running")
+        .menu(&menu)
+        .on_menu_event(|app, event| match event.id.as_ref() {
+            "show" => {
+                if let Some(window) = app.get_webview_window("main") {
+                    let _ = window.show();
+                    let _ = window.set_focus();
+                }
+            }
+            "quit" => app.exit(0),
+            _ => {}
+        });
+    if let Some(icon) = app.default_window_icon().cloned() {
+        tray = tray.icon(icon);
+    }
+    tray.build(app)?;
+    Ok(())
+}
+
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_notification::init())
+        .on_window_event(|window, event| {
+            if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+                api.prevent_close();
+                let _ = window.hide();
+            }
+        })
         .setup(|app| {
             let directory = app
                 .path()
@@ -287,6 +383,9 @@ pub fn run() {
                 database: Mutex::new(DatabaseRuntime::new(directory.join("dayplan.sqlite3"))),
                 agent: PlannerAgent::default(),
             });
+            install_tray(app)?;
+            let handle = app.handle().clone();
+            tauri::async_runtime::spawn(reminder_worker(handle));
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
