@@ -4,8 +4,8 @@ import {
   Command, ExternalLink, LoaderCircle, MoreHorizontal, Plus, RotateCcw, Sparkles,
   Trash2, TriangleAlert, X
 } from "lucide-react";
-import { api, DailyTask, OllamaStatus, PlannerResponse, ScheduleEvent } from "./api";
-import { dateTimeFields, dayLabel, dayShort, localDateTimeToUtc, localTimeZone, offsetDay, timeLabel, todayDay } from "./date";
+import { api, DailyTask, LocalDateTimeResolution, OllamaStatus, PlannerResponse, ScheduleEvent } from "./api";
+import { dateTimeFields, dayLabel, dayShort, localTimeZone, offsetDay, timeLabel, todayDay } from "./date";
 
 type DraftEvent = { title: string; notes: string; day: string; time: string; durationMinutes: number };
 
@@ -48,18 +48,20 @@ export default function App() {
   useEffect(() => { void refresh(); }, [refresh]);
   useEffect(() => { void refreshStatus(); }, [refreshStatus]);
 
-  async function saveEvent(draft: DraftEvent, event?: ScheduleEvent) {
+  async function saveEvent(draft: DraftEvent, event: ScheduleEvent | undefined, startAtUtc: string) {
     try {
-      const startAtUtc = localDateTimeToUtc(draft.day, draft.time);
       if (!event) {
         await api.createEvent({ title: draft.title, notes: draft.notes, startAtUtc, timeZone: localTimeZone, durationMinutes: draft.durationMinutes });
       } else {
-        const renamed = draft.title !== event.title || draft.notes !== event.notes;
-        const original = dateTimeFields(event.startAtUtc);
-        const timingChanged = original.day !== draft.day || original.time !== draft.time || event.durationMinutes !== draft.durationMinutes;
-        let current = event;
-        if (renamed) current = await api.updateEvent({ id: current.id, revision: current.revision, title: draft.title, notes: draft.notes, durationMinutes: timingChanged ? event.durationMinutes : draft.durationMinutes });
-        if (timingChanged) await api.rescheduleEvent({ id: current.id, revision: current.revision, startAtUtc, timeZone: localTimeZone, durationMinutes: draft.durationMinutes });
+        await api.updateEvent({
+          id: event.id,
+          revision: event.revision,
+          title: draft.title,
+          notes: draft.notes,
+          startAtUtc,
+          timeZone: localTimeZone,
+          durationMinutes: draft.durationMinutes
+        });
       }
       setEditor(null);
       await refresh();
@@ -219,11 +221,22 @@ function PlannerCard({ status, events, command, onCommand, onSubmit, thinking, r
   </section>;
 }
 
-function EventEditor({ day, event, onClose, onSave }: { day: string; event?: ScheduleEvent; onClose: () => void; onSave: (draft: DraftEvent, event?: ScheduleEvent) => Promise<void> }) {
+function EventEditor({ day, event, onClose, onSave }: { day: string; event?: ScheduleEvent; onClose: () => void; onSave: (draft: DraftEvent, event: ScheduleEvent | undefined, startAtUtc: string) => Promise<void> }) {
   const [draft, setDraft] = useState(() => draftFor(day, event));
   const [saving, setSaving] = useState(false);
-  async function submit(form: FormEvent) { form.preventDefault(); setSaving(true); try { await onSave(draft, event); } finally { setSaving(false); } }
-  return <div className="modal-backdrop" role="presentation"><form className="event-editor" onSubmit={submit} aria-label={event ? "Edit event" : "New event"}><header><div><p>{event ? "EDIT TIME BLOCK" : "NEW TIME BLOCK"}</p><h2>{event ? "Refine the details" : "Make room for it"}</h2></div><button type="button" onClick={onClose} aria-label="Close editor"><X size={19} /></button></header><label>Title<input autoFocus value={draft.title} onChange={(input) => setDraft({ ...draft, title: input.target.value })} required maxLength={140} placeholder="What needs your time?" /></label><div className="form-pair"><label>Date<input type="date" value={draft.day} onChange={(input) => setDraft({ ...draft, day: input.target.value })} required /></label><label>Time<input type="time" value={draft.time} onChange={(input) => setDraft({ ...draft, time: input.target.value })} required /></label></div><label>Duration <span>{draft.durationMinutes} minutes</span><input className="range" type="range" min="5" max="240" step="5" value={draft.durationMinutes} onChange={(input) => setDraft({ ...draft, durationMinutes: Number(input.target.value) })} /></label><label>Notes<textarea value={draft.notes} onChange={(input) => setDraft({ ...draft, notes: input.target.value })} placeholder="Optional context for your future self" maxLength={800} /></label><footer><button type="button" className="editor-cancel" onClick={onClose}>Cancel</button><button className="editor-save" disabled={saving || !draft.title.trim()}>{saving && <LoaderCircle className="spin" size={15} />}{event ? "Save changes" : "Create event"}</button></footer></form></div>;
+  const [resolution, setResolution] = useState<LocalDateTimeResolution | null>(null);
+  async function persist(startAtUtc: string) { setSaving(true); try { await onSave(draft, event, startAtUtc); } finally { setSaving(false); } }
+  async function submit(form: FormEvent) {
+    form.preventDefault();
+    setSaving(true);
+    try {
+      const next = await api.resolveLocalDateTime(draft.day, draft.time, localTimeZone);
+      setResolution(next);
+      if (next.kind === "resolved") await onSave(draft, event, next.startAtUtc);
+    } finally { setSaving(false); }
+  }
+  const updateDraft = (next: DraftEvent) => { setDraft(next); setResolution(null); };
+  return <div className="modal-backdrop" role="presentation"><form className="event-editor" onSubmit={submit} aria-label={event ? "Edit event" : "New event"}><header><div><p>{event ? "EDIT TIME BLOCK" : "NEW TIME BLOCK"}</p><h2>{event ? "Refine the details" : "Make room for it"}</h2></div><button type="button" onClick={onClose} aria-label="Close editor"><X size={19} /></button></header><label>Title<input autoFocus value={draft.title} onChange={(input) => updateDraft({ ...draft, title: input.target.value })} required maxLength={140} placeholder="What needs your time?" /></label><div className="form-pair"><label>Date<input type="date" value={draft.day} onChange={(input) => updateDraft({ ...draft, day: input.target.value })} required /></label><label>Time<input type="time" value={draft.time} onChange={(input) => updateDraft({ ...draft, time: input.target.value })} required /></label></div>{resolution?.kind === "nonexistent" && <div className="time-resolution" role="alert">{resolution.message}</div>}{resolution?.kind === "ambiguous" && <div className="time-resolution"><strong>This time happens twice.</strong><p>Choose which clock occurrence you mean:</p>{resolution.options.map((option) => <button type="button" key={option.startAtUtc} onClick={() => void persist(option.startAtUtc)}>{option.label}</button>)}</div>}<label>Duration <span>{draft.durationMinutes} minutes</span><input className="range" type="range" min="5" max="240" step="5" value={draft.durationMinutes} onChange={(input) => updateDraft({ ...draft, durationMinutes: Number(input.target.value) })} /></label><label>Notes<textarea value={draft.notes} onChange={(input) => updateDraft({ ...draft, notes: input.target.value })} placeholder="Optional context for your future self" maxLength={800} /></label><footer><button type="button" className="editor-cancel" onClick={onClose}>Cancel</button><button className="editor-save" disabled={saving || !draft.title.trim()}>{saving && <LoaderCircle className="spin" size={15} />}{event ? "Save changes" : "Create event"}</button></footer></form></div>;
 }
 
 function LoadingLine({ label }: { label: string }) { return <div className="loading-line"><LoaderCircle className="spin" size={18} />{label}</div>; }
