@@ -172,6 +172,8 @@ pub enum MutationOperation {
     RescheduleEvent {
         event_id: String,
         expected_revision: i64,
+        title: Option<String>,
+        notes: Option<String>,
         start_at_utc: String,
         time_zone: String,
         duration_minutes: Option<i64>,
@@ -180,7 +182,7 @@ pub enum MutationOperation {
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
-pub enum PlannerResponse {
+pub enum ModelResponse {
     Proposal {
         summary: String,
         operations: Vec<MutationOperation>,
@@ -190,11 +192,29 @@ pub enum PlannerResponse {
     },
 }
 
-impl PlannerResponse {
+impl ModelResponse {
     pub fn proposal(summary: impl Into<String>, operations: Vec<MutationOperation>) -> Self {
         Self::Proposal {
             summary: summary.into(),
             operations,
         }
     }
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq)]
+#[serde(
+    tag = "kind",
+    rename_all = "snake_case",
+    rename_all_fields = "camelCase"
+)]
+pub enum PlannerResponse {
+    Proposal {
+        proposal_id: String,
+        summary: String,
+        operations: Vec<MutationOperation>,
+        expires_at: String,
+    },
+    Clarification {
+        question: String,
+    },
 }

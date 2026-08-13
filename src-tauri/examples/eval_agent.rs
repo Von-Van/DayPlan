@@ -1,8 +1,9 @@
+use chrono::{SecondsFormat, Utc};
 use dayplan_desktop::agent::{ollama_status, PlannerAgent};
 use dayplan_desktop::db::PlannerDatabase;
 use dayplan_desktop::model::{CreateEventInput, MutationOperation, PlannerResponse};
-use reqwest::blocking::Client;
-use serde::Deserialize;
+use reqwest::Client;
+use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::env;
 use std::fs;
@@ -68,37 +69,149 @@ enum ExpectedOperation {
     #[serde(rename = "reschedule_event")]
     Reschedule {
         event_title: String,
+        title: Option<String>,
+        notes: Option<String>,
         start_at_utc: String,
         time_zone: String,
         duration_minutes: Option<i64>,
     },
 }
 
-fn main() {
-    let fixtures = fixture_path().unwrap_or_else(|error| {
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct EvalReport {
+    generated_at: String,
+    model_name: String,
+    model_digest: Option<String>,
+    ollama_version: Option<String>,
+    fixture_count: usize,
+    runs: Vec<RunReport>,
+    passed: bool,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct RunReport {
+    run: usize,
+    schema_valid: usize,
+    exact: usize,
+    fields_correct: usize,
+    fields_total: usize,
+    safety_exact: usize,
+    safety_total: usize,
+    failures: Vec<String>,
+    passed: bool,
+}
+
+struct EvalOptions {
+    fixtures: PathBuf,
+    runs: usize,
+    json_output: Option<PathBuf>,
+}
+
+#[tokio::main]
+async fn main() {
+    let options = eval_options().unwrap_or_else(|error| {
         eprintln!("{error}");
         std::process::exit(2)
     });
-    let contents = fs::read_to_string(&fixtures).unwrap_or_else(|error| {
-        eprintln!("Could not read {}: {error}", fixtures.display());
+    let contents = fs::read_to_string(&options.fixtures).unwrap_or_else(|error| {
+        eprintln!("Could not read {}: {error}", options.fixtures.display());
         std::process::exit(2)
     });
     let cases: Vec<EvalCase> = serde_json::from_str(&contents).unwrap_or_else(|error| {
         eprintln!("Invalid eval fixture JSON: {error}");
         std::process::exit(2)
     });
-    let status = ollama_status(&Client::new());
+    let status = ollama_status(&Client::new()).await;
     if !status.running || !status.model_installed {
         eprintln!("Live evaluation cannot start: {}", status.detail);
         std::process::exit(2);
     }
-    let mut exact = 0usize;
-    let mut valid = 0usize;
-    let mut fields_correct = 0usize;
-    let mut fields_total = 0usize;
-    let mut failures = Vec::new();
+    let mut runs = Vec::new();
+    for run in 1..=options.runs {
+        let result = evaluate_run(run, &cases).await;
+        print_run(&result, cases.len());
+        runs.push(result);
+    }
+    let passed = runs.iter().all(|run| run.passed);
+    let report = EvalReport {
+        generated_at: Utc::now().to_rfc3339_opts(SecondsFormat::Millis, true),
+        model_name: status.model_name,
+        model_digest: status.model_digest,
+        ollama_version: status.ollama_version,
+        fixture_count: cases.len(),
+        runs,
+        passed,
+    };
+    if let Some(path) = options.json_output {
+        if let Some(parent) = path.parent() {
+            fs::create_dir_all(parent).unwrap_or_else(|error| {
+                eprintln!("Could not create {}: {error}", parent.display());
+                std::process::exit(2)
+            });
+        }
+        fs::write(
+            &path,
+            serde_json::to_vec_pretty(&report).expect("serialize report"),
+        )
+        .unwrap_or_else(|error| {
+            eprintln!("Could not write {}: {error}", path.display());
+            std::process::exit(2)
+        });
+        println!("Machine-readable report: {}", path.display());
+    }
+    if !passed {
+        std::process::exit(1);
+    }
+}
 
-    for case in &cases {
+fn eval_options() -> Result<EvalOptions, String> {
+    let mut args = env::args().skip(1);
+    let mut fixtures = None;
+    let mut runs = 1usize;
+    let mut json_output = None;
+    while let Some(argument) = args.next() {
+        match argument.as_str() {
+            "--fixtures" => fixtures = args.next().map(PathBuf::from),
+            "--runs" => {
+                runs = args
+                    .next()
+                    .ok_or("--runs requires a positive integer")?
+                    .parse()
+                    .map_err(|_| "--runs requires a positive integer")?;
+                if runs == 0 {
+                    return Err("--runs requires a positive integer".into());
+                }
+            }
+            "--json-output" => json_output = args.next().map(PathBuf::from),
+            _ => return Err(format!("Unknown argument: {argument}")),
+        }
+    }
+    Ok(EvalOptions {
+        fixtures: fixtures
+            .ok_or("Usage: eval_agent --fixtures path [--runs 3] [--json-output path]")?,
+        runs,
+        json_output,
+    })
+}
+
+async fn evaluate_run(run: usize, cases: &[EvalCase]) -> RunReport {
+    let mut result = RunReport {
+        run,
+        schema_valid: 0,
+        exact: 0,
+        fields_correct: 0,
+        fields_total: 0,
+        safety_exact: 0,
+        safety_total: cases
+            .iter()
+            .filter(|case| matches!(case.expected, ExpectedResponse::Clarification))
+            .count(),
+        failures: Vec::new(),
+        passed: false,
+    };
+    for case in cases {
         let directory = tempdir().expect("temporary directory");
         let path = directory.path().join("eval.sqlite3");
         let mut database = PlannerDatabase::open(&path).expect("evaluation database");
@@ -118,72 +231,81 @@ fn main() {
         let candidates = database
             .candidate_events(&case.command, &case.day, &case.time_zone, &[], 60)
             .expect("fixture candidates");
-        let mut agent = PlannerAgent::default();
-        let history_result = case.history.iter().try_for_each(|previous_command| {
-            agent
+        let agent = PlannerAgent::default();
+        let mut history_result = Ok(());
+        for previous_command in &case.history {
+            if let Err(error) = agent
                 .propose(previous_command, &case.day, &case.time_zone, &candidates)
-                .map(|_| ())
-        });
-        let actual = history_result
-            .and_then(|_| agent.propose(&case.command, &case.day, &case.time_zone, &candidates));
+                .await
+            {
+                history_result = Err(error);
+                break;
+            }
+        }
+        let actual = match history_result {
+            Ok(()) => {
+                agent
+                    .propose(&case.command, &case.day, &case.time_zone, &candidates)
+                    .await
+            }
+            Err(error) => Err(error),
+        };
         match actual {
             Ok(response) => {
-                valid += 1;
+                result.schema_valid += 1;
                 let (is_exact, correct, total) = score(&case.expected, &response, &titles_by_id);
                 if is_exact {
-                    exact += 1;
+                    result.exact += 1;
+                    if matches!(case.expected, ExpectedResponse::Clarification) {
+                        result.safety_exact += 1;
+                    }
                 } else {
-                    failures.push(format!(
+                    result.failures.push(format!(
                         "{}: expected {}, got {}",
                         case.id,
                         expected_description(&case.expected),
                         actual_description(&response, &titles_by_id)
                     ));
                 }
-                fields_correct += correct;
-                fields_total += total;
+                result.fields_correct += correct;
+                result.fields_total += total;
             }
             Err(error) => {
-                fields_total += expected_field_count(&case.expected);
-                failures.push(format!("{}: agent error: {error}", case.id));
+                result.fields_total += expected_field_count(&case.expected);
+                result
+                    .failures
+                    .push(format!("{}: agent error: {error}", case.id));
             }
         }
     }
-    let count = cases.len().max(1);
-    println!("DayPlan local-agent evaluation — model qwen3:8b");
-    println!(
-        "Cases: {} | schema-valid responses: {}/{} ({:.1}%)",
-        cases.len(),
-        valid,
-        cases.len(),
-        valid as f64 / count as f64 * 100.0
-    );
-    println!(
-        "Exact proposal accuracy: {}/{} ({:.1}%)",
-        exact,
-        cases.len(),
-        exact as f64 / count as f64 * 100.0
-    );
-    println!(
-        "Field accuracy: {}/{} ({:.1}%)",
-        fields_correct,
-        fields_total,
-        percentage(fields_correct, fields_total)
-    );
-    if !failures.is_empty() {
-        println!("\nFailures:");
-        for failure in failures {
-            println!("- {failure}");
-        }
-        std::process::exit(1);
-    }
+    result.passed = result.schema_valid == cases.len()
+        && result.safety_exact == result.safety_total
+        && percentage(result.exact, cases.len()) >= 85.0
+        && percentage(result.fields_correct, result.fields_total) >= 95.0;
+    result
 }
 
-fn fixture_path() -> Result<PathBuf, String> {
-    let mut args = env::args().skip(1);
-    match (args.next().as_deref(), args.next()) {
-        (Some("--fixtures"), Some(value)) => Ok(PathBuf::from(value)),
-        _ => Err("Usage: eval_agent --fixtures path/to/cases.json".into()),
+fn print_run(result: &RunReport, case_count: usize) {
+    println!("DayPlan qwen3:8b evaluation — run {}", result.run);
+    println!(
+        "Schema valid: {}/{} ({:.1}%) | exact: {}/{} ({:.1}%) | fields: {}/{} ({:.1}%) | safety: {}/{}",
+        result.schema_valid,
+        case_count,
+        percentage(result.schema_valid, case_count),
+        result.exact,
+        case_count,
+        percentage(result.exact, case_count),
+        result.fields_correct,
+        result.fields_total,
+        percentage(result.fields_correct, result.fields_total),
+        result.safety_exact,
+        result.safety_total
+    );
+    if !result.failures.is_empty() {
+        println!("Failures:");
+        for failure in &result.failures {
+            println!("- {failure}");
+        }
     }
 }
 
@@ -205,7 +327,11 @@ fn score(
             let mut correct = 0;
             let mut total = 0;
             let mut exact = expected.len() == actual.len();
-            for (expected, actual) in expected.iter().zip(actual.iter()) {
+            let mut expected_ordered = expected.iter().collect::<Vec<_>>();
+            expected_ordered.sort_by_key(|operation| expected_operation_key(operation));
+            let mut actual_ordered = actual.iter().collect::<Vec<_>>();
+            actual_ordered.sort_by_key(|operation| actual_operation_key(operation, titles));
+            for (expected, actual) in expected_ordered.into_iter().zip(actual_ordered) {
                 let (matches, matching_fields, all_fields) =
                     score_operation(expected, actual, titles);
                 exact &= matches;
@@ -218,6 +344,41 @@ fn score(
             (exact, correct, total)
         }
         _ => (false, 0, expected_field_count(expected)),
+    }
+}
+
+fn expected_operation_key(operation: &ExpectedOperation) -> String {
+    match operation {
+        ExpectedOperation::Create {
+            title,
+            start_at_utc,
+            ..
+        } => format!("create:{title}:{start_at_utc}"),
+        ExpectedOperation::Update { event_title, .. } => format!("update:{event_title}"),
+        ExpectedOperation::Delete { event_title } => format!("delete:{event_title}"),
+        ExpectedOperation::Reschedule { event_title, .. } => {
+            format!("reschedule:{event_title}")
+        }
+    }
+}
+
+fn actual_operation_key(operation: &MutationOperation, titles: &HashMap<String, String>) -> String {
+    let event_title = |id: &str| titles.get(id).map(String::as_str).unwrap_or("<unknown>");
+    match operation {
+        MutationOperation::CreateEvent {
+            title,
+            start_at_utc,
+            ..
+        } => format!("create:{title}:{start_at_utc}"),
+        MutationOperation::UpdateEvent { event_id, .. } => {
+            format!("update:{}", event_title(event_id))
+        }
+        MutationOperation::DeleteEvent { event_id, .. } => {
+            format!("delete:{}", event_title(event_id))
+        }
+        MutationOperation::RescheduleEvent { event_id, .. } => {
+            format!("reschedule:{}", event_title(event_id))
+        }
     }
 }
 
@@ -286,12 +447,16 @@ fn score_operation(
         (
             ExpectedOperation::Reschedule {
                 event_title,
+                title,
+                notes,
                 start_at_utc,
                 time_zone,
                 duration_minutes,
             },
             MutationOperation::RescheduleEvent {
                 event_id,
+                title: a_title,
+                notes: a_notes,
                 start_at_utc: a_start,
                 time_zone: a_zone,
                 duration_minutes: a_duration,
@@ -303,6 +468,12 @@ fn score_operation(
                 start_at_utc == a_start,
                 time_zone == a_zone,
             ]);
+            if let Some(value) = title {
+                fields.push(Some(value) == a_title.as_ref());
+            }
+            if let Some(value) = notes {
+                fields.push(Some(value) == a_notes.as_ref());
+            }
             if let Some(value) = duration_minutes {
                 fields.push(Some(value) == a_duration.as_ref());
             }
@@ -337,8 +508,11 @@ fn expected_operation_field_count(operation: &ExpectedOperation) -> usize {
         } => 1 + title.iter().count() + notes.iter().count() + duration_minutes.iter().count(),
         ExpectedOperation::Delete { .. } => 1,
         ExpectedOperation::Reschedule {
-            duration_minutes, ..
-        } => 3 + duration_minutes.iter().count(),
+            title,
+            notes,
+            duration_minutes,
+            ..
+        } => 3 + title.iter().count() + notes.iter().count() + duration_minutes.iter().count(),
     }
 }
 
