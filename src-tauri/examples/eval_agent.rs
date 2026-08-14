@@ -115,7 +115,9 @@ fn main() {
                 .expect("valid fixture event");
             titles_by_id.insert(created.id, created.title);
         }
-        let candidates = database.candidate_events(60).expect("fixture candidates");
+        let candidates = database
+            .candidate_events(&case.command, &case.day, &case.time_zone, &[], 60)
+            .expect("fixture candidates");
         let mut agent = PlannerAgent::default();
         let history_result = case.history.iter().try_for_each(|previous_command| {
             agent

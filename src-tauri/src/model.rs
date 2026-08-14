@@ -1,7 +1,12 @@
 use serde::{Deserialize, Serialize};
 
+pub const MAX_TITLE_LENGTH: usize = 140;
+pub const MAX_NOTES_LENGTH: usize = 800;
+pub const MAX_COMMAND_LENGTH: usize = 1_000;
+pub const MAX_OPERATIONS: usize = 12;
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct ScheduleEvent {
     pub id: String,
     pub title: String,
@@ -15,7 +20,7 @@ pub struct ScheduleEvent {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct DailyTask {
     pub id: String,
     pub title: String,
@@ -45,6 +50,8 @@ pub struct UpdateEventInput {
     pub revision: i64,
     pub title: Option<String>,
     pub notes: Option<String>,
+    pub start_at_utc: Option<String>,
+    pub time_zone: Option<String>,
     pub duration_minutes: Option<i64>,
 }
 
@@ -71,6 +78,69 @@ pub struct UpdateTaskInput {
     pub id: String,
     pub title: Option<String>,
     pub completed: Option<bool>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct LocalDateTimeInput {
+    pub day: String,
+    pub time: String,
+    pub time_zone: String,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq)]
+#[serde(
+    tag = "kind",
+    rename_all = "snake_case",
+    rename_all_fields = "camelCase"
+)]
+pub enum LocalDateTimeResolution {
+    Resolved { start_at_utc: String },
+    Ambiguous { options: Vec<LocalTimeOption> },
+    Nonexistent { message: String },
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct LocalTimeOption {
+    pub start_at_utc: String,
+    pub utc_offset_minutes: i32,
+    pub label: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ExportBundle {
+    pub format_version: u32,
+    pub exported_at: String,
+    pub events: Vec<ScheduleEvent>,
+    pub tasks: Vec<DailyTask>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ImportPreview {
+    pub event_count: usize,
+    pub task_count: usize,
+    pub earliest_day: Option<String>,
+    pub latest_day: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BackupInfo {
+    pub name: String,
+    pub created_at: String,
+    pub size_bytes: u64,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DatabaseStatus {
+    pub ready: bool,
+    pub schema_version: u32,
+    pub error: Option<crate::error::CommandError>,
+    pub backups: Vec<BackupInfo>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
