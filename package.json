@@ -13,7 +13,8 @@
     "test:watch": "vitest",
     "tauri": "tauri",
     "eval": "cargo run --manifest-path src-tauri/Cargo.toml --example eval_agent -- --fixtures eval/cases.json --runs 3 --json-output eval/results/latest.json",
-    "version:check": "node scripts/check-versions.mjs"
+    "version:check": "node scripts/check-versions.mjs",
+    "ollama:verify": "node scripts/verify-ollama-runtime.mjs"
   },
   "dependencies": {
     "@tauri-apps/api": "^2.0.0",

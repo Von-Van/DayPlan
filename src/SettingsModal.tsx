@@ -1,6 +1,5 @@
 import { useEffect, useRef, useState } from "react";
 import { getVersion } from "@tauri-apps/api/app";
-import { openUrl } from "@tauri-apps/plugin-opener";
 import { relaunch } from "@tauri-apps/plugin-process";
 import { check, Update } from "@tauri-apps/plugin-updater";
 import {
@@ -197,12 +196,79 @@ export function SettingsModal({
               <button onClick={() => void onRefreshStatus()}>
                 <RefreshCw size={14} /> Refresh diagnostics
               </button>
+              {!status?.modelInstalled && (
+                <button
+                  disabled={busy === "model"}
+                  onClick={() => {
+                    if (
+                      !window.confirm(
+                        "Download qwen3:8b? It is about 5.2 GB and DayPlan recommends roughly 10 GB of free space.",
+                      )
+                    )
+                      return;
+                    void run("model", async () => {
+                      const poll = window.setInterval(
+                        () => void onRefreshStatus(),
+                        750,
+                      );
+                      try {
+                        await api.downloadModel();
+                        await onRefreshStatus();
+                      } finally {
+                        window.clearInterval(poll);
+                      }
+                    });
+                  }}
+                >
+                  <Download size={14} /> Download model
+                </button>
+              )}
+              {status?.phase === "downloading" && (
+                <button onClick={() => void api.cancelModelDownload()}>
+                  <X size={14} /> Cancel download
+                </button>
+              )}
               <button
-                onClick={() => void openUrl("https://ollama.com/download")}
+                disabled={busy === "runtime"}
+                onClick={() =>
+                  void run("runtime", async () => {
+                    await api.restartModelRuntime();
+                    await onRefreshStatus();
+                  })
+                }
               >
-                <Download size={14} /> Ollama setup
+                <RefreshCw size={14} /> Restart runtime
               </button>
+              {status?.modelInstalled && (
+                <button
+                  disabled={busy === "remove-model"}
+                  onClick={() => {
+                    if (
+                      !window.confirm(
+                        "Remove qwen3:8b and all DayPlan AI model data? Your schedule is not affected.",
+                      )
+                    )
+                      return;
+                    void run("remove-model", async () => {
+                      await api.removeModel();
+                      await onRefreshStatus();
+                      onMessage("Local AI model data removed.");
+                    });
+                  }}
+                >
+                  <X size={14} /> Remove model
+                </button>
+              )}
             </div>
+            <p>
+              Runtime: {status?.ollamaVersion ?? "checking"}
+              {status?.storageBytes != null
+                ? ` · ${(status.storageBytes / 1_073_741_824).toFixed(1)} GB stored`
+                : ""}
+            </p>
+            {status?.modelLicense && (
+              <p>Model license: {status.modelLicense}</p>
+            )}
           </SettingsBlock>
 
           <SettingsBlock

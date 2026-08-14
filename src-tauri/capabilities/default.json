@@ -8,9 +8,7 @@
     {
       "identifier": "opener:allow-open-url",
       "allow": [
-        { "url": "https://ollama.com/download*" },
         { "url": "https://ollama.com/library/qwen3:8b*" },
-        { "url": "https://docs.ollama.com/*" },
         { "url": "https://github.com/Von-Van/DayPlan/releases*" }
       ]
     },

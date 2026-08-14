@@ -15,7 +15,8 @@ flowchart LR
   U["React + TypeScript UI"] -->|"Typed Tauri commands"| R["Rust services"]
   R --> D["SQLite repository"]
   U -->|"Natural-language command"| A["Rust PlannerAgent"]
-  A -->|"Ranked event context; no notes"| O["Ollama qwen3:8b on localhost"]
+  A -->|"Ranked event context; no notes"| M["Managed Ollama runtime"]
+  M -->|"Private dynamic loopback port"| O["qwen3:8b in DayPlan storage"]
   O -->|"Exactly one tool call"| V["Strict schema + Serde validation"]
   V -->|"Proposal ID + preview"| U
   U -->|"Confirm proposal ID"| P["Pending proposal registry"]
@@ -28,7 +29,7 @@ flowchart LR
 - **Tauri 2 + React + TypeScript** provides one desktop codebase for macOS 13+ universal binaries and Windows 10 22H2/11 x64.
 - **Rust services** own validation, local-time resolution, AI context selection, proposal state, file import/export, and every database mutation.
 - **SQLite** stores `ScheduleEvent` and `DailyTask` records. Transactional migrations use `PRAGMA user_version`; startup runs `quick_check`; migration/import/restore operations create checkpointed backups, with the latest five retained.
-- **Ollama** runs `qwen3:8b` at `127.0.0.1`. DayPlan has no account, API key, hosted backend, cloud fallback, or per-command API fee.
+- **Managed Ollama** is bundled with DayPlan and runs `qwen3:8b` on a private, dynamically selected loopback port. DayPlan never connects to a system Ollama installation and has no account, API key, hosted backend, cloud fallback, or per-command API fee.
 
 ## AI permission boundary
 
@@ -72,20 +73,20 @@ Desired reminder state and the retryable outbox are stored in the same SQLite tr
 
 Desktop caveat: the official Tauri notification plugin sends the OS notification, while DayPlan’s Rust worker owns timing. Closing the window keeps DayPlan in the system tray so reminders continue; fully choosing **Quit DayPlan** stops delivery. Windows notification acceptance testing must use the installed NSIS build.
 
-## First run and local model
+## Bundled local AI runtime
 
-The first-run flow explains local storage, Ollama, the model download, and optional notification permission.
+The signed macOS and Windows installers include the Ollama server runtime; users do not install or manage Ollama separately. DayPlan pins Ollama 0.32.0, verifies its official release checksum before packaging, includes the MIT license, and updates the runtime only through signed DayPlan releases. The renderer cannot access Ollama directly.
 
-1. Install [Ollama for macOS or Windows](https://ollama.com/download).
-2. Download the model once:
+On first run:
 
-   ```bash
-   ollama pull qwen3:8b
-   ```
+- DayPlan starts its isolated runtime lazily and verifies its version;
+- the user explicitly approves the approximately 5.2 GB `qwen3:8b` download;
+- onboarding shows progress and offers cancellation/retry; and
+- DayPlan verifies the installed model tag and digest before enabling AI.
 
-3. Start DayPlan and refresh model diagnostics.
+Downloaded layers and models live under DayPlan application data and survive normal app upgrades or uninstall/reinstall. Settings can restart the runtime, redownload the model, show storage/version/digest diagnostics, or explicitly remove all AI model data without touching schedule data.
 
-`qwen3:8b` is about 5.2 GB. The supported beta baseline is macOS 13+ or Windows 10 22H2/11 x64, with 16 GB RAM recommended and roughly 10 GB free for Ollama plus the model. Inference latency depends on local hardware, but calendar data stays on the machine after installation. [Ollama quickstart](https://docs.ollama.com/quickstart) · [Qwen3 model](https://ollama.com/library/qwen3%3A8b)
+The supported beta baseline is macOS 13+ or Windows 10 22H2/11 x64, with 16 GB RAM recommended and roughly 10 GB free for the model and transient download data. Inference latency depends on local hardware, but calendar data stays on the machine. [Ollama license](https://github.com/ollama/ollama/blob/main/LICENSE) · [Qwen3 model](https://ollama.com/library/qwen3%3A8b)
 
 ## Evaluation harness
 
@@ -106,7 +107,7 @@ It records the Ollama version, model tag/digest, per-case failures, schema compl
 
 ### Current baseline
 
-No valid live baseline is committed yet. The 68-case suite was invoked on August 13, 2026, but stopped before scoring because Ollama was not running. The harness exits with a non-success status in that state rather than reporting an availability failure as model quality. A three-run result against one recorded `qwen3:8b` digest is a beta release blocker.
+No valid live baseline is committed yet. On August 14, 2026, the suite successfully launched through the bundled Ollama 0.32.0 runtime with cloud mode disabled and the locally verified `qwen3:8b` model. The full three-run job was not allowed to publish a partial score; at roughly 4–8 seconds per model-backed case on the test machine, it must be completed as a dedicated release-gate run. The harness still exits without a report when runtime/model availability fails. A completed three-run result against one recorded digest remains a beta release blocker.
 
 ## Development and quality gates
 
@@ -118,6 +119,7 @@ npm run tauri dev
 
 npm run format:check
 npm run version:check
+npm run ollama:verify
 npm test
 npm run build
 cargo fmt --manifest-path src-tauri/Cargo.toml --check
@@ -125,14 +127,14 @@ cargo test --manifest-path src-tauri/Cargo.toml
 cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings
 ```
 
-PR CI adds production-only npm auditing, `cargo-audit`, `cargo-deny` advisory/license/source checks, and unsigned native bundles on macOS and Windows. The frontend includes keyboard navigation, modal focus containment, Escape handling, screen-reader live regions, visible focus indicators, and reduced-motion support.
+PR CI adds production-only npm auditing, `cargo-audit`, `cargo-deny` advisory/license/source checks, checksum-verified Ollama runtime acquisition, and unsigned native bundles on macOS and Windows. Runtime binaries and model files are deliberately excluded from Git. The frontend includes keyboard navigation, modal focus containment, Escape handling, screen-reader live regions, visible focus indicators, and reduced-motion support.
 
 ## Signed beta delivery
 
 A `v*` tag triggers a fail-closed draft-release workflow:
 
-- arm64 and Intel macOS app builds are merged into a universal binary, Developer ID signed, notarized with App Store Connect API credentials, stapled, and packaged as a DMG;
-- the Windows x64 NSIS installer is signed with Azure Artifact Signing and verified with `Get-AuthenticodeSignature`;
+- arm64 and Intel macOS app builds include both native Ollama payloads, are merged into a universal binary, Developer ID signed (including nested runtime executables), notarized, stapled, and packaged as a DMG;
+- the Windows x64 Ollama runtime and NSIS installer are signed with Azure Artifact Signing and the installer is verified with `Get-AuthenticodeSignature`;
 - updater packages are signed after native signing, and `latest.json`, SHA-256 checksums, release notes, and a CycloneDX SBOM are attached; and
 - the GitHub Release remains a draft.
 

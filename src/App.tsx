@@ -655,7 +655,9 @@ function PlannerCard({
       <div className={`model-state ${ready ? "ready" : "not-ready"}`}>
         <span />
         <div>
-          <strong>{ready ? "Local model ready" : "Ollama setup needed"}</strong>
+          <strong>
+            {ready ? "Local model ready" : "Local model setup needed"}
+          </strong>
           <p>{status?.detail ?? "Checking your local model…"}</p>
         </div>
         <button onClick={onRefreshStatus} aria-label="Refresh model status">

@@ -1,0 +1,15 @@
+{
+  "version": "0.32.0",
+  "source": "https://github.com/ollama/ollama/releases/tag/v0.32.0",
+  "license": "MIT",
+  "artifacts": {
+    "macos": {
+      "name": "ollama-darwin.tgz",
+      "sha256": "3b12a49c6c4cbafd7ffba5ccba60cbf80274cdc22eea3ead79c646aba888174c"
+    },
+    "windows-x86_64": {
+      "name": "ollama-windows-amd64.zip",
+      "sha256": "56561a8f0a904483303c610e61af61c5a7b6f5496ce3707e207d25d4ff67b89e"
+    }
+  }
+}

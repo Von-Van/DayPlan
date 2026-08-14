@@ -13,7 +13,7 @@ import {
   Download,
   ShieldCheck,
 } from "lucide-react";
-import { OllamaStatus } from "./api";
+import { api, OllamaStatus } from "./api";
 
 export function Onboarding({
   status,
@@ -30,6 +30,7 @@ export function Onboarding({
   const [permission, setPermission] = useState<
     "unknown" | "granted" | "denied"
   >("unknown");
+  const [downloading, setDownloading] = useState(false);
   const dialogRef = useRef<HTMLElement>(null);
   useEffect(() => {
     dialogRef.current?.focus();
@@ -68,6 +69,25 @@ export function Onboarding({
       onMessage(cause instanceof Error ? cause.message : String(cause));
     }
   }
+  async function downloadModel() {
+    if (
+      !window.confirm(
+        "Download qwen3:8b now? It is about 5.2 GB and DayPlan recommends roughly 10 GB of free space. The model's license will be stored with the model metadata.",
+      )
+    )
+      return;
+    setDownloading(true);
+    const poll = window.setInterval(() => void onRefresh(), 750);
+    try {
+      await api.downloadModel();
+      await onRefresh();
+    } catch (cause) {
+      onMessage(cause instanceof Error ? cause.message : String(cause));
+    } finally {
+      window.clearInterval(poll);
+      setDownloading(false);
+    }
+  }
   const panels = [
     <div className="onboarding-panel" key="storage">
       <span className="onboarding-icon">
@@ -91,15 +111,34 @@ export function Onboarding({
         <Bot size={26} />
       </span>
       <p>STEP 2 OF 3</p>
-      <h2>Bring your own local model.</h2>
+      <h2>Your private AI runs inside DayPlan.</h2>
       <div className={`setup-status ${ready ? "ready" : ""}`}>
         <span />
         {status?.detail ?? "Checking Ollama and qwen3:8b…"}
       </div>
-      <code>ollama pull qwen3:8b</code>
+      <p className="onboarding-model-note">
+        The Ollama runtime is included. The qwen3:8b model is a separate
+        one-time download of about 5.2 GB; allow roughly 10 GB of free space.
+      </p>
+      {status?.download?.percent !== null && status?.download && (
+        <progress max="100" value={status.download.percent ?? undefined}>
+          {status.download.percent ?? 0}%
+        </progress>
+      )}
       <div className="onboarding-links">
-        <button onClick={() => void openUrl("https://ollama.com/download")}>
-          <Download size={15} /> Install Ollama
+        {!ready && (
+          <button disabled={downloading} onClick={() => void downloadModel()}>
+            <Download size={15} />{" "}
+            {downloading ? "Downloading…" : "Download model"}
+          </button>
+        )}
+        {downloading && (
+          <button onClick={() => void api.cancelModelDownload()}>Cancel</button>
+        )}
+        <button
+          onClick={() => void openUrl("https://ollama.com/library/qwen3:8b")}
+        >
+          Model details &amp; license
         </button>
         <button onClick={() => void onRefresh()}>Check again</button>
       </div>

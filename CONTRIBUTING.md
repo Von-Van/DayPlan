@@ -12,8 +12,9 @@ Thanks for your interest. This repository is a **portfolio preview** and intenti
 ## Development
 
 - Node.js and Rust versions pinned by `.nvmrc` and `rust-toolchain.toml`
-- Ollama with `qwen3:8b` only when exercising the live evaluation harness
-- Run `npm ci`, `npm run format:check`, `npm run version:check`, `npm test`, and `npm run build`
+- DayPlan release builds fetch the pinned Ollama runtime with `scripts/fetch-ollama-runtime.*`; never commit runtime or model binaries
+- `qwen3:8b` is needed only when exercising the live evaluation harness
+- Run `npm ci`, `npm run format:check`, `npm run version:check`, `npm run ollama:verify`, `npm test`, and `npm run build`
 - Run `cargo fmt --manifest-path src-tauri/Cargo.toml --check`, `cargo test --manifest-path src-tauri/Cargo.toml`, and `cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings`
 - Never commit local databases/logs, planner content, credentials, signing material, model files, or unredacted diagnostics
 - Release changes must follow [`RELEASE_CHECKLIST.md`](RELEASE_CHECKLIST.md)

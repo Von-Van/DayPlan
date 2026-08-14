@@ -12,8 +12,12 @@ pub enum AppError {
     NotFound,
     #[error("This schedule item changed after the proposal was created. Review the agenda and try again.")]
     Conflict,
-    #[error("The local Ollama service could not be reached. Start Ollama, then make sure qwen3:8b is installed.")]
+    #[error("DayPlan's local AI runtime is unavailable. Restart it from Settings and try again.")]
     OllamaUnavailable,
+    #[error("DayPlan's bundled AI runtime is missing or incompatible: {0}")]
+    OllamaRuntime(String),
+    #[error("The local model download was cancelled.")]
+    ModelDownloadCancelled,
     #[error("Ollama returned an invalid planner response: {0}")]
     InvalidModelResponse(String),
     #[error("The local DayPlan database did not pass its integrity check. Restore a backup from Settings.")]
@@ -69,6 +73,8 @@ impl From<AppError> for CommandError {
             AppError::NotFound => ("not_found", false),
             AppError::Conflict => ("conflict", true),
             AppError::OllamaUnavailable => ("ollama_unavailable", true),
+            AppError::OllamaRuntime(_) => ("ollama_runtime", true),
+            AppError::ModelDownloadCancelled => ("model_download_cancelled", true),
             AppError::InvalidModelResponse(_) => ("invalid_model_response", true),
             AppError::CorruptDatabase => ("corrupt_database", false),
             AppError::UnsupportedDatabaseVersion => ("unsupported_database_version", false),

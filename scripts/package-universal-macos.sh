@@ -10,5 +10,6 @@ test -n "$intel_app"
 mkdir -p "$output"
 ditto "$arm_app" "$output/DayPlan.app"
 lipo -create "$arm_app/Contents/MacOS/dayplan-desktop" "$intel_app/Contents/MacOS/dayplan-desktop" -output "$output/DayPlan.app/Contents/MacOS/dayplan-desktop"
+find "$output/DayPlan.app/Contents/Resources/resources/ollama" -type f -perm -111 -exec codesign --force --options runtime --timestamp --sign "$APPLE_SIGNING_IDENTITY" {} \;
 codesign --force --deep --options runtime --timestamp --sign "$APPLE_SIGNING_IDENTITY" "$output/DayPlan.app"
 codesign --verify --deep --strict --verbose=2 "$output/DayPlan.app"

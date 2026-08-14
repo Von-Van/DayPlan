@@ -1,10 +1,10 @@
 use chrono::{SecondsFormat, Utc};
-use dayplan_desktop::agent::{ollama_status, PlannerAgent};
+use dayplan_desktop::agent::{PlannerAgent, MODEL_NAME};
 use dayplan_desktop::db::PlannerDatabase;
 use dayplan_desktop::model::{
     CreateEventInput, MutationOperation, PlannerResponse, ReminderChange,
 };
-use reqwest::Client;
+use dayplan_desktop::runtime::OllamaRuntimeManager;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::env;
@@ -133,14 +133,23 @@ async fn main() {
         eprintln!("Invalid eval fixture JSON: {error}");
         std::process::exit(2)
     });
-    let status = ollama_status(&Client::new()).await;
+    let runtime = OllamaRuntimeManager::new(
+        PathBuf::from(env!("CARGO_MANIFEST_DIR")),
+        eval_data_directory(),
+    )
+    .unwrap_or_else(|error| {
+        eprintln!("Live evaluation cannot initialize DayPlan's bundled runtime: {error}");
+        std::process::exit(2)
+    });
+    let agent = PlannerAgent::new(runtime.endpoint(), MODEL_NAME);
+    let status = runtime.status(&agent).await;
     if !status.running || !status.model_installed {
         eprintln!("Live evaluation cannot start: {}", status.detail);
         std::process::exit(2);
     }
     let mut runs = Vec::new();
     for run in 1..=options.runs {
-        let result = evaluate_run(run, &cases).await;
+        let result = evaluate_run(run, &cases, runtime.endpoint()).await;
         print_run(&result, cases.len());
         runs.push(result);
     }
@@ -176,6 +185,21 @@ async fn main() {
     }
 }
 
+fn eval_data_directory() -> PathBuf {
+    if let Some(path) = env::var_os("DAYPLAN_EVAL_DATA_DIR") {
+        return PathBuf::from(path);
+    }
+    #[cfg(target_os = "macos")]
+    if let Some(home) = env::var_os("HOME") {
+        return PathBuf::from(home).join("Library/Application Support/com.vonvan.dayplan.desktop");
+    }
+    #[cfg(target_os = "windows")]
+    if let Some(app_data) = env::var_os("APPDATA") {
+        return PathBuf::from(app_data).join("com.vonvan.dayplan.desktop");
+    }
+    env::temp_dir().join("dayplan-eval-data")
+}
+
 fn eval_options() -> Result<EvalOptions, String> {
     let mut args = env::args().skip(1);
     let mut fixtures = None;
@@ -206,7 +230,7 @@ fn eval_options() -> Result<EvalOptions, String> {
     })
 }
 
-async fn evaluate_run(run: usize, cases: &[EvalCase]) -> RunReport {
+async fn evaluate_run(run: usize, cases: &[EvalCase], endpoint: &str) -> RunReport {
     let mut result = RunReport {
         run,
         schema_valid: 0,
@@ -242,7 +266,7 @@ async fn evaluate_run(run: usize, cases: &[EvalCase]) -> RunReport {
         let candidates = database
             .candidate_events(&case.command, &case.day, &case.time_zone, &[], 60)
             .expect("fixture candidates");
-        let agent = PlannerAgent::default();
+        let agent = PlannerAgent::new(endpoint, MODEL_NAME);
         let mut history_result = Ok(());
         for previous_command in &case.history {
             if let Err(error) = agent

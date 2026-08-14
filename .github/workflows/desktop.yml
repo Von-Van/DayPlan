@@ -38,6 +38,7 @@ jobs:
           workspaces: src-tauri
       - run: npm ci
       - run: npm run version:check
+      - run: npm run ollama:verify
       - run: npm run format:check
       - run: npm test
       - run: npm run build
@@ -79,6 +80,14 @@ jobs:
         with:
           workspaces: src-tauri
       - run: npm ci
+      - name: Fetch pinned Ollama runtime
+        shell: bash
+        if: runner.os == 'macOS'
+        run: scripts/fetch-ollama-runtime.sh
+      - name: Fetch pinned Ollama runtime
+        shell: pwsh
+        if: runner.os == 'Windows'
+        run: scripts/fetch-ollama-runtime.ps1
       - run: npm run tauri build -- --bundles ${{ matrix.bundles }} --config src-tauri/tauri.ci.conf.json
         env:
           DAYPLAN_UPDATER_PUBKEY: ${{ vars.TAURI_UPDATER_PUBKEY }}

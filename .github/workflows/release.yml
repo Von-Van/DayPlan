@@ -24,6 +24,7 @@ jobs:
           toolchain: 1.97.1
       - run: npm ci
       - run: npm run version:check
+      - run: npm run ollama:verify
       - run: npm audit --omit=dev --audit-level=high
       - name: Install Rust audit tools
         uses: taiki-e/install-action@v2
@@ -81,6 +82,8 @@ jobs:
           toolchain: 1.97.1
           targets: ${{ matrix.target }}
       - run: npm ci
+      - name: Fetch and verify Ollama runtime
+        run: scripts/fetch-ollama-runtime.sh
       - run: npm run tauri build -- --target ${{ matrix.target }} --bundles app
         env:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
@@ -144,16 +147,30 @@ jobs:
         with:
           toolchain: 1.97.1
       - run: npm ci
-      - run: npm run tauri build -- --bundles nsis
-        env:
-          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
-          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
-          DAYPLAN_UPDATER_PUBKEY: ${{ vars.TAURI_UPDATER_PUBKEY }}
+      - name: Fetch and verify Ollama runtime
+        shell: pwsh
+        run: scripts/fetch-ollama-runtime.ps1
       - uses: azure/login@v2
         with:
           client-id: ${{ secrets.AZURE_CLIENT_ID }}
           tenant-id: ${{ secrets.AZURE_TENANT_ID }}
           subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+      - name: Sign bundled Ollama executables
+        uses: azure/artifact-signing-action@v2
+        with:
+          endpoint: ${{ vars.AZURE_SIGNING_ENDPOINT }}
+          signing-account-name: ${{ vars.AZURE_SIGNING_ACCOUNT }}
+          certificate-profile-name: ${{ vars.AZURE_SIGNING_PROFILE }}
+          files-folder: src-tauri/resources/ollama/windows-x86_64
+          files-folder-filter: exe,dll
+          file-digest: SHA256
+          timestamp-rfc3161: http://timestamp.acs.microsoft.com
+          timestamp-digest: SHA256
+      - run: npm run tauri build -- --bundles nsis
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+          DAYPLAN_UPDATER_PUBKEY: ${{ vars.TAURI_UPDATER_PUBKEY }}
       - name: Azure Artifact Signing
         uses: azure/artifact-signing-action@v2
         with:

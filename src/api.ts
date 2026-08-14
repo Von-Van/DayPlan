@@ -116,12 +116,32 @@ const agendaSchema = z
   .strict();
 const statusSchema = z
   .object({
+    phase: z.enum([
+      "unavailable",
+      "starting",
+      "ready_without_model",
+      "downloading",
+      "model_ready",
+      "update_required",
+      "error",
+    ]),
     running: z.boolean(),
     modelInstalled: z.boolean(),
     modelName: z.string(),
     modelDigest: z.string().nullable(),
     ollamaVersion: z.string().nullable(),
+    modelLicense: z.string().nullable(),
     detail: z.string(),
+    download: z
+      .object({
+        completed: z.number().nonnegative(),
+        total: z.number().nonnegative().nullable(),
+        percent: z.number().int().min(0).max(100).nullable(),
+        status: z.string(),
+      })
+      .strict()
+      .nullable(),
+    storageBytes: z.number().nonnegative().nullable(),
   })
   .strict();
 const commandErrorSchema = z
@@ -274,6 +294,18 @@ export const api = {
   },
   async status() {
     return statusSchema.parse(await invokeCommand("current_ollama_status"));
+  },
+  async downloadModel() {
+    await invokeCommand("download_ollama_model");
+  },
+  async cancelModelDownload() {
+    await invokeCommand("cancel_ollama_model_download");
+  },
+  async restartModelRuntime() {
+    await invokeCommand("restart_ollama_runtime");
+  },
+  async removeModel() {
+    await invokeCommand("remove_ollama_model");
   },
   async propose(command: string, day: string, timeZone: string) {
     return plannerResponseSchema.parse(

@@ -2,6 +2,7 @@ pub mod agent;
 pub mod db;
 pub mod error;
 pub mod model;
+pub mod runtime;
 
 use agent::{OllamaStatus, PlannerAgent};
 use db::{backups_for_path, restore_backup, DueReminder, PlannerDatabase, CURRENT_SCHEMA_VERSION};
@@ -11,6 +12,7 @@ use model::{
     LocalDateTimeInput, LocalDateTimeResolution, PlannerResponse, RescheduleEventInput,
     ScheduleEvent, UpdateEventInput, UpdateTaskInput,
 };
+use runtime::OllamaRuntimeManager;
 use serde::Serialize;
 use std::fs::{self, File};
 use std::io::{Read, Write};
@@ -30,6 +32,7 @@ const MAX_IMPORT_BYTES: u64 = 50 * 1024 * 1024;
 struct AppState {
     database: Mutex<DatabaseRuntime>,
     agent: PlannerAgent,
+    ollama: OllamaRuntimeManager,
     pending_import: Mutex<Option<PendingImport>>,
 }
 
@@ -97,6 +100,9 @@ struct DiagnosticManifest {
     model_name: String,
     model_digest: Option<String>,
     ollama_version: Option<String>,
+    ollama_phase: runtime::RuntimePhase,
+    model_license: Option<String>,
+    model_storage_bytes: Option<u64>,
     privacy_note: &'static str,
 }
 
@@ -369,7 +375,40 @@ fn restore_database_backup(
 
 #[tauri::command]
 async fn current_ollama_status(state: State<'_, AppState>) -> Result<OllamaStatus, CommandError> {
-    Ok(state.agent.status().await)
+    Ok(state.ollama.status(&state.agent).await)
+}
+
+#[tauri::command]
+async fn download_ollama_model(state: State<'_, AppState>) -> Result<(), CommandError> {
+    state
+        .ollama
+        .pull_model(&state.agent)
+        .await
+        .map_err(CommandError::from)
+}
+
+#[tauri::command]
+fn cancel_ollama_model_download(state: State<'_, AppState>) {
+    state.ollama.cancel_download();
+}
+
+#[tauri::command]
+async fn restart_ollama_runtime(state: State<'_, AppState>) -> Result<(), CommandError> {
+    state
+        .ollama
+        .restart(&state.agent)
+        .await
+        .map_err(CommandError::from)
+}
+
+#[tauri::command]
+async fn remove_ollama_model(state: State<'_, AppState>) -> Result<(), CommandError> {
+    state.agent.clear_context().map_err(CommandError::from)?;
+    state
+        .ollama
+        .remove_model()
+        .await
+        .map_err(CommandError::from)
 }
 
 #[tauri::command]
@@ -394,7 +433,7 @@ async fn export_diagnostic_bundle(
                 .unwrap_or(0),
         )
     };
-    let model = state.agent.status().await;
+    let model = state.ollama.status(&state.agent).await;
     let manifest = DiagnosticManifest {
         generated_at: chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true),
         app_version: app.package_info().version.to_string(),
@@ -408,6 +447,9 @@ async fn export_diagnostic_bundle(
         model_name: model.model_name,
         model_digest: model.model_digest,
         ollama_version: model.ollama_version,
+        ollama_phase: model.phase,
+        model_license: model.model_license,
+        model_storage_bytes: model.storage_bytes,
         privacy_note: "Commands, event/task titles, notes, proposal contents, and database paths are excluded.",
     };
     let app_for_dialog = app.clone();
@@ -509,6 +551,11 @@ async fn propose_schedule_changes(
     day: String,
     time_zone: String,
 ) -> Result<PlannerResponse, CommandError> {
+    state
+        .ollama
+        .ensure_started(&state.agent)
+        .await
+        .map_err(CommandError::from)?;
     let referenced_ids = state.agent.referenced_event_ids();
     let candidates = with_database(&state, |database| {
         database.candidate_events(&command, &day, &time_zone, &referenced_ids, 60)
@@ -680,9 +727,17 @@ pub fn run() {
                 .app_data_dir()
                 .map_err(|error| error.to_string())?;
             fs::create_dir_all(&directory).map_err(|error| error.to_string())?;
+            let resource_directory = app
+                .path()
+                .resource_dir()
+                .map_err(|error| error.to_string())?;
+            let ollama = OllamaRuntimeManager::new(resource_directory, directory.clone())
+                .map_err(|error| error.to_string())?;
+            let agent = PlannerAgent::new(ollama.endpoint(), agent::MODEL_NAME);
             app.manage(AppState {
                 database: Mutex::new(DatabaseRuntime::new(directory.join("dayplan.sqlite3"))),
-                agent: PlannerAgent::default(),
+                agent,
+                ollama,
                 pending_import: Mutex::new(None),
             });
             tauri_plugin_log::log::info!("app_started");
@@ -708,6 +763,10 @@ pub fn run() {
             discard_selected_import,
             restore_database_backup,
             current_ollama_status,
+            download_ollama_model,
+            cancel_ollama_model_download,
+            restart_ollama_runtime,
+            remove_ollama_model,
             export_diagnostic_bundle,
             propose_schedule_changes,
             apply_schedule_changes,

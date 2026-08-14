@@ -15,6 +15,7 @@ This checklist gates publishing an existing draft GitHub Release. Record the tes
 - [ ] Production npm audit has no high/critical advisory.
 - [ ] Rust advisory, license, and source-policy checks pass.
 - [ ] Rust formatting, clippy, tests, frontend tests, and production builds pass.
+- [ ] The pinned Ollama manifest, MIT notice, archive checksums, runtime version, and SBOM entries are verified.
 - [ ] Three committed live-eval runs use the same recorded `qwen3:8b` digest.
 - [ ] Every eval run meets 100% schema, 100% safety, 85% exact, and 95% field accuracy.
 - [ ] Draft release contains notarized universal DMG, Azure-signed x64 NSIS installer, updater artifacts/signatures, `latest.json`, checksums, notes, and SBOM.
@@ -24,7 +25,9 @@ This checklist gates publishing an existing draft GitHub Release. Record the tes
 - [ ] `codesign`, Gatekeeper assessment, notarization, and staple verification pass.
 - [ ] Clean install and first-run onboarding work on Apple Silicon.
 - [ ] Launch and core agenda flow work on Intel hardware or an Intel runner artifact.
-- [ ] Ollama unavailable, installed-without-model, and ready states are clear.
+- [ ] Bundled runtime missing/start failure, downloading/cancel/retry, model-not-installed, and model-ready states are clear.
+- [ ] A running system Ollama on port 11434 is ignored; DayPlan uses only its private managed endpoint and model directory.
+- [ ] Runtime executables for both macOS architectures are signed inside the app bundle.
 - [ ] Events/tasks persist across restart; closing the window retains tray delivery.
 - [ ] Schema-1 migration creates a backup and preserves data.
 - [ ] Corrupt-database startup offers recovery without deleting data.
@@ -37,7 +40,8 @@ This checklist gates publishing an existing draft GitHub Release. Record the tes
 
 - [ ] Authenticode status is valid and SmartScreen/install identity is reviewed.
 - [ ] Clean NSIS install and first-run onboarding work.
-- [ ] Ollama unavailable, installed-without-model, and ready states are clear.
+- [ ] Bundled runtime missing/start failure, downloading/cancel/retry, model-not-installed, and model-ready states are clear.
+- [ ] A running system Ollama on port 11434 is ignored and the bundled runtime executables are Authenticode signed.
 - [ ] Events/tasks persist across restart; tray behavior is correct.
 - [ ] Migration, recovery, JSON round-trip, stale-proposal rejection, and permission denial match macOS.
 - [ ] Installed-build notification fires while the window is closed and never includes notes.

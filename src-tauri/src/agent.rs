@@ -4,6 +4,7 @@ use crate::model::{
     ModelResponse, MutationOperation, PlannerResponse, ScheduleEvent, MAX_COMMAND_LENGTH,
     MAX_NOTES_LENGTH, MAX_OPERATIONS, MAX_REMINDER_MINUTES, MAX_TITLE_LENGTH,
 };
+use crate::runtime::{DownloadProgress, RuntimePhase};
 use chrono::{DateTime, Duration as ChronoDuration, SecondsFormat, Utc};
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
@@ -23,12 +24,16 @@ const MAX_RESPONSE_BYTES: usize = 256 * 1024;
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct OllamaStatus {
+    pub phase: RuntimePhase,
     pub running: bool,
     pub model_installed: bool,
     pub model_name: String,
     pub model_digest: Option<String>,
     pub ollama_version: Option<String>,
+    pub model_license: Option<String>,
     pub detail: String,
+    pub download: Option<DownloadProgress>,
+    pub storage_bytes: Option<u64>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -199,6 +204,7 @@ impl PlannerAgent {
         let request = json!({
             "model": self.model_name,
             "stream": false,
+            "think": false,
             "tools": [{
                 "type": "function",
                 "function": {
@@ -390,12 +396,16 @@ async fn ollama_status_at(client: &Client, base_url: &str, model_name: &str) -> 
         Ok(body) => body,
         Err(_) => {
             return OllamaStatus {
+                phase: RuntimePhase::Error,
                 running: true,
                 model_installed: false,
                 model_name: model_name.into(),
                 model_digest: None,
                 ollama_version: None,
+                model_license: None,
                 detail: "Ollama replied with an unreadable model list.".into(),
+                download: None,
+                storage_bytes: None,
             }
         }
     };
@@ -419,28 +429,62 @@ async fn ollama_status_at(client: &Client, base_url: &str, model_name: &str) -> 
     } else {
         None
     };
+    let model_license = if installed.is_some() {
+        match tokio::time::timeout(
+            Duration::from_secs(3),
+            client
+                .post(format!("{base_url}/api/show"))
+                .json(&json!({ "model": model_name }))
+                .send(),
+        )
+        .await
+        {
+            Ok(Ok(response)) if response.status().is_success() => response
+                .json::<OllamaShow>()
+                .await
+                .ok()
+                .and_then(|body| summarize_license(&body.license)),
+            _ => None,
+        }
+    } else {
+        None
+    };
     OllamaStatus {
+        phase: if installed.is_some() {
+            RuntimePhase::ModelReady
+        } else {
+            RuntimePhase::ReadyWithoutModel
+        },
         running: true,
         model_installed: installed.is_some(),
         model_name: model_name.into(),
         model_digest: installed.as_ref().map(|model| model.digest.clone()),
         ollama_version,
+        model_license,
         detail: if installed.is_some() {
             "Local model is ready. Nothing is sent to a cloud service.".into()
         } else {
-            format!("Ollama is running, but {model_name} is not installed. Run: ollama pull {model_name}")
+            format!(
+                "DayPlan's local runtime is ready. Download {model_name} to enable AI planning."
+            )
         },
+        download: None,
+        storage_bytes: None,
     }
 }
 
 fn unavailable_status(model_name: &str) -> OllamaStatus {
     OllamaStatus {
+        phase: RuntimePhase::Unavailable,
         running: false,
         model_installed: false,
         model_name: model_name.into(),
         model_digest: None,
         ollama_version: None,
-        detail: "Ollama is not running on this computer.".into(),
+        model_license: None,
+        detail: "DayPlan's local AI runtime is not running.".into(),
+        download: None,
+        storage_bytes: None,
     }
 }
 
@@ -801,6 +845,20 @@ struct OllamaVersion {
 }
 
 #[derive(Deserialize)]
+struct OllamaShow {
+    #[serde(default)]
+    license: String,
+}
+
+fn summarize_license(license: &str) -> Option<String> {
+    license
+        .lines()
+        .map(str::trim)
+        .find(|line| !line.is_empty())
+        .map(|line| line.chars().take(120).collect())
+}
+
+#[derive(Deserialize)]
 struct OllamaChatResponse {
     message: OllamaMessage,
 }
@@ -1047,7 +1105,7 @@ mod tests {
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let address = listener.local_addr().unwrap();
         tokio::spawn(async move {
-            for _ in 0..3 {
+            for _ in 0..4 {
                 let (mut stream, _) = listener.accept().await.unwrap();
                 let mut request = vec![0; 16 * 1024];
                 let count = stream.read(&mut request).await.unwrap();
@@ -1056,6 +1114,8 @@ mod tests {
                     r#"{"models":[{"name":"qwen3:8b","digest":"sha256:test"}]}"#
                 } else if request.contains("/api/version") {
                     r#"{"version":"test"}"#
+                } else if request.contains("/api/show") {
+                    r#"{"license":"Apache-2.0"}"#
                 } else {
                     r#"{"message":{"tool_calls":[]}}"#
                 };
