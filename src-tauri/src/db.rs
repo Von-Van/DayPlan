@@ -2,21 +2,37 @@ use crate::error::{AppError, AppResult};
 use crate::model::{
     BackupInfo, CreateEventInput, CreateTaskInput, DailyTask, ExportBundle, ImportPreview,
     LocalDateTimeInput, LocalDateTimeResolution, LocalTimeOption, ModelResponse, MutationOperation,
-    RescheduleEventInput, ScheduleEvent, UpdateEventInput, UpdateTaskInput, MAX_NOTES_LENGTH,
-    MAX_OPERATIONS, MAX_TITLE_LENGTH,
+    ReminderChange, ReminderStatus, RescheduleEventInput, ScheduleEvent, UpdateEventInput,
+    UpdateTaskInput, MAX_NOTES_LENGTH, MAX_OPERATIONS, MAX_REMINDER_MINUTES, MAX_TITLE_LENGTH,
 };
-use chrono::{DateTime, LocalResult, NaiveDate, NaiveDateTime, NaiveTime, Offset, TimeZone, Utc};
+use chrono::{
+    DateTime, Duration as ChronoDuration, LocalResult, NaiveDate, NaiveDateTime, NaiveTime, Offset,
+    TimeZone, Utc,
+};
 use chrono_tz::Tz;
-use rusqlite::{params, Connection, OptionalExtension, Row, Transaction, TransactionBehavior};
+use rusqlite::{
+    params, types::Type, Connection, OptionalExtension, Row, Transaction, TransactionBehavior,
+};
 use std::cmp::Reverse;
 use std::collections::HashSet;
 use std::fs;
 use std::path::{Path, PathBuf};
 use uuid::Uuid;
 
-pub const CURRENT_SCHEMA_VERSION: u32 = 1;
-pub const EXPORT_FORMAT_VERSION: u32 = 1;
+pub const CURRENT_SCHEMA_VERSION: u32 = 2;
+pub const EXPORT_FORMAT_VERSION: u32 = 2;
 const BACKUP_RETENTION: usize = 5;
+const REMINDER_DELIVERY_GRACE_MINUTES: i64 = 15;
+
+#[derive(Debug, Clone)]
+pub struct DueReminder {
+    pub event_id: String,
+    pub event_revision: i64,
+    pub notification_id: String,
+    pub title: String,
+    pub start_at_utc: String,
+    pub time_zone: String,
+}
 
 pub struct PlannerDatabase {
     connection: Connection,
@@ -107,10 +123,33 @@ impl PlannerDatabase {
         transaction.execute("DELETE FROM daily_tasks", [])?;
         transaction.execute("DELETE FROM schedule_events", [])?;
         for event in &bundle.events {
+            let reminder_status = if event.reminder_minutes_before.is_some() {
+                ReminderStatus::Pending
+            } else {
+                ReminderStatus::None
+            };
             transaction.execute(
-                "INSERT INTO schedule_events (id, title, notes, start_at_utc, time_zone, duration_minutes, revision, created_at, updated_at)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
-                params![event.id, event.title.trim(), event.notes.trim(), event.start_at_utc, event.time_zone, event.duration_minutes, event.revision, event.created_at, event.updated_at],
+                "INSERT INTO schedule_events
+                 (id, title, notes, start_at_utc, time_zone, duration_minutes,
+                  reminder_minutes_before, reminder_status, notification_id,
+                  revision, created_at, updated_at)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)",
+                params![
+                    event.id,
+                    event.title.trim(),
+                    event.notes.trim(),
+                    event.start_at_utc,
+                    event.time_zone,
+                    event.duration_minutes,
+                    event.reminder_minutes_before,
+                    reminder_status_string(&reminder_status),
+                    event
+                        .reminder_minutes_before
+                        .map(|_| Uuid::new_v4().to_string()),
+                    event.revision,
+                    event.created_at,
+                    event.updated_at
+                ],
             )?;
         }
         for task in &bundle.tasks {
@@ -157,7 +196,8 @@ impl PlannerDatabase {
 
     fn all_events(&self) -> AppResult<Vec<ScheduleEvent>> {
         let mut statement = self.connection.prepare(
-            "SELECT id, title, notes, start_at_utc, time_zone, duration_minutes, revision, created_at, updated_at
+            "SELECT id, title, notes, start_at_utc, time_zone, duration_minutes,
+                    reminder_minutes_before, reminder_status, revision, created_at, updated_at
              FROM schedule_events ORDER BY start_at_utc ASC, created_at ASC",
         )?;
         let rows = statement.query_map([], event_from_row)?;
@@ -182,6 +222,10 @@ impl PlannerDatabase {
                  start_at_utc TEXT NOT NULL,
                  time_zone TEXT NOT NULL,
                  duration_minutes INTEGER NOT NULL CHECK(duration_minutes BETWEEN 5 AND 1440),
+                 reminder_minutes_before INTEGER CHECK(reminder_minutes_before BETWEEN 0 AND 10080),
+                 reminder_status TEXT NOT NULL DEFAULT 'none',
+                 notification_id TEXT UNIQUE,
+                 reminder_last_error TEXT,
                  revision INTEGER NOT NULL DEFAULT 1,
                  created_at TEXT NOT NULL,
                  updated_at TEXT NOT NULL
@@ -217,22 +261,34 @@ impl PlannerDatabase {
         let start_at_utc = input.start_at_utc.unwrap_or(existing.start_at_utc);
         let time_zone = input.time_zone.unwrap_or(existing.time_zone);
         let duration_minutes = input.duration_minutes.unwrap_or(existing.duration_minutes);
+        let reminder_minutes_before =
+            apply_reminder_change(&input.reminder_change, existing.reminder_minutes_before)?;
         validate_title(&title)?;
         validate_notes(&notes)?;
         let (start_at_utc, time_zone) = validate_time(&start_at_utc, &time_zone)?;
         validate_duration(duration_minutes)?;
+        if matches!(input.reminder_change, ReminderChange::Set { .. }) {
+            validate_reminder_delivery_time(&start_at_utc, reminder_minutes_before)?;
+        }
+        let (reminder_status, notification_id) =
+            reminder_outbox_values(&start_at_utc, reminder_minutes_before)?;
         let now = now();
         let changed = self.connection.execute(
             "UPDATE schedule_events
              SET title = ?1, notes = ?2, start_at_utc = ?3, time_zone = ?4,
-                 duration_minutes = ?5, revision = revision + 1, updated_at = ?6
-             WHERE id = ?7 AND revision = ?8",
+                 duration_minutes = ?5, reminder_minutes_before = ?6,
+                 reminder_status = ?7, notification_id = ?8, reminder_last_error = NULL,
+                 revision = revision + 1, updated_at = ?9
+             WHERE id = ?10 AND revision = ?11",
             params![
                 title.trim(),
                 notes.trim(),
                 start_at_utc,
                 time_zone,
                 duration_minutes,
+                reminder_minutes_before,
+                reminder_status_string(&reminder_status),
+                notification_id,
                 now,
                 input.id,
                 input.revision
@@ -257,12 +313,36 @@ impl PlannerDatabase {
     }
 
     pub fn reschedule_event(&mut self, input: RescheduleEventInput) -> AppResult<ScheduleEvent> {
+        let existing = self.event_by_id(&input.id)?.ok_or(AppError::NotFound)?;
+        if existing.revision != input.revision {
+            return Err(AppError::Conflict);
+        }
         let (start_at_utc, time_zone) = validate_time(&input.start_at_utc, &input.time_zone)?;
         validate_duration(input.duration_minutes)?;
+        let reminder_minutes_before =
+            apply_reminder_change(&input.reminder_change, existing.reminder_minutes_before)?;
+        if matches!(input.reminder_change, ReminderChange::Set { .. }) {
+            validate_reminder_delivery_time(&start_at_utc, reminder_minutes_before)?;
+        }
+        let (reminder_status, notification_id) =
+            reminder_outbox_values(&start_at_utc, reminder_minutes_before)?;
         let changed = self.connection.execute(
-            "UPDATE schedule_events SET start_at_utc=?1, time_zone=?2, duration_minutes=?3, revision=revision+1, updated_at=?4
-             WHERE id=?5 AND revision=?6",
-            params![start_at_utc, time_zone, input.duration_minutes, now(), input.id, input.revision],
+            "UPDATE schedule_events
+             SET start_at_utc=?1, time_zone=?2, duration_minutes=?3,
+                 reminder_minutes_before=?4, reminder_status=?5, notification_id=?6,
+                 reminder_last_error=NULL, revision=revision+1, updated_at=?7
+             WHERE id=?8 AND revision=?9",
+            params![
+                start_at_utc,
+                time_zone,
+                input.duration_minutes,
+                reminder_minutes_before,
+                reminder_status_string(&reminder_status),
+                notification_id,
+                now(),
+                input.id,
+                input.revision
+            ],
         )?;
         match changed {
             1 => self.event_by_id(&input.id)?.ok_or(AppError::NotFound),
@@ -274,7 +354,8 @@ impl PlannerDatabase {
     pub fn events_for_day(&self, day: &str, time_zone: &str) -> AppResult<Vec<ScheduleEvent>> {
         let (start, end) = day_bounds(day, time_zone)?;
         let mut statement = self.connection.prepare(
-            "SELECT id, title, notes, start_at_utc, time_zone, duration_minutes, revision, created_at, updated_at
+            "SELECT id, title, notes, start_at_utc, time_zone, duration_minutes,
+                    reminder_minutes_before, reminder_status, revision, created_at, updated_at
              FROM schedule_events
              WHERE julianday(start_at_utc) < julianday(?2)
                AND julianday(start_at_utc, printf('+%d minutes', duration_minutes)) > julianday(?1)
@@ -393,6 +474,110 @@ impl PlannerDatabase {
         collect(rows)
     }
 
+    /// Reconciles the persisted reminder outbox after startup or an interrupted delivery pass.
+    /// Future reminders become schedulable; reminders missed by more than the grace window expire.
+    pub fn reconcile_reminders(&mut self) -> AppResult<()> {
+        let timestamp = now();
+        self.connection.execute(
+            "UPDATE schedule_events
+             SET reminder_status = 'none', notification_id = NULL, reminder_last_error = NULL
+             WHERE reminder_minutes_before IS NULL",
+            [],
+        )?;
+        self.connection.execute(
+            "UPDATE schedule_events
+             SET reminder_status = 'expired', reminder_last_error = NULL
+             WHERE reminder_minutes_before IS NOT NULL
+               AND julianday(start_at_utc, printf('-%d minutes', reminder_minutes_before))
+                   <= julianday(?1, printf('-%d minutes', ?2))",
+            params![timestamp, REMINDER_DELIVERY_GRACE_MINUTES],
+        )?;
+        self.connection.execute(
+            "UPDATE schedule_events
+             SET reminder_status = 'scheduled',
+                 notification_id = COALESCE(notification_id, lower(hex(randomblob(16)))),
+                 reminder_last_error = NULL
+             WHERE reminder_minutes_before IS NOT NULL
+               AND reminder_status IN ('pending', 'error', 'needs_permission')
+               AND julianday(start_at_utc, printf('-%d minutes', reminder_minutes_before))
+                   > julianday(?1, printf('-%d minutes', ?2))",
+            params![timestamp, REMINDER_DELIVERY_GRACE_MINUTES],
+        )?;
+        Ok(())
+    }
+
+    pub fn due_reminders(&self, limit: usize) -> AppResult<Vec<DueReminder>> {
+        let timestamp = now();
+        let mut statement = self.connection.prepare(
+            "SELECT id, revision, notification_id, title, start_at_utc, time_zone
+             FROM schedule_events
+             WHERE reminder_minutes_before IS NOT NULL
+               AND reminder_status IN ('scheduled', 'error')
+               AND notification_id IS NOT NULL
+               AND julianday(start_at_utc, printf('-%d minutes', reminder_minutes_before)) <= julianday(?1)
+               AND julianday(start_at_utc, printf('-%d minutes', reminder_minutes_before))
+                   > julianday(?1, printf('-%d minutes', ?2))
+             ORDER BY julianday(start_at_utc, printf('-%d minutes', reminder_minutes_before)) ASC
+             LIMIT ?3",
+        )?;
+        let rows = statement.query_map(
+            params![
+                timestamp,
+                REMINDER_DELIVERY_GRACE_MINUTES,
+                limit.min(50) as i64
+            ],
+            |row| {
+                Ok(DueReminder {
+                    event_id: row.get(0)?,
+                    event_revision: row.get(1)?,
+                    notification_id: row.get(2)?,
+                    title: row.get(3)?,
+                    start_at_utc: row.get(4)?,
+                    time_zone: row.get(5)?,
+                })
+            },
+        )?;
+        collect(rows)
+    }
+
+    pub fn mark_reminder_delivered(&mut self, reminder: &DueReminder) -> AppResult<()> {
+        self.connection.execute(
+            "UPDATE schedule_events
+             SET reminder_status='expired', reminder_last_error=NULL
+             WHERE id=?1 AND revision=?2 AND notification_id=?3",
+            params![
+                reminder.event_id,
+                reminder.event_revision,
+                reminder.notification_id
+            ],
+        )?;
+        Ok(())
+    }
+
+    pub fn mark_reminder_error(
+        &mut self,
+        reminder: &DueReminder,
+        error_code: &str,
+    ) -> AppResult<()> {
+        let redacted = error_code
+            .chars()
+            .filter(|character| character.is_ascii_alphanumeric() || matches!(character, '_' | '-'))
+            .take(64)
+            .collect::<String>();
+        self.connection.execute(
+            "UPDATE schedule_events
+             SET reminder_status='error', reminder_last_error=?1
+             WHERE id=?2 AND revision=?3 AND notification_id=?4",
+            params![
+                redacted,
+                reminder.event_id,
+                reminder.event_revision,
+                reminder.notification_id
+            ],
+        )?;
+        Ok(())
+    }
+
     pub fn apply_proposal(&mut self, proposal: &ModelResponse) -> AppResult<Vec<ScheduleEvent>> {
         let ModelResponse::Proposal { operations, .. } = proposal else {
             return Err(AppError::Validation(
@@ -412,6 +597,7 @@ impl PlannerDatabase {
                     start_at_utc,
                     time_zone,
                     duration_minutes,
+                    reminder_minutes_before,
                 } => {
                     let event = insert_event(
                         &transaction,
@@ -421,6 +607,7 @@ impl PlannerDatabase {
                             start_at_utc,
                             time_zone,
                             *duration_minutes,
+                            *reminder_minutes_before,
                         )?,
                     )?;
                     affected_ids.push(event.id);
@@ -431,6 +618,7 @@ impl PlannerDatabase {
                     title,
                     notes,
                     duration_minutes,
+                    reminder_change,
                 } => {
                     let current = event_by_id(&transaction, event_id)?.ok_or(AppError::NotFound)?;
                     if current.revision != *expected_revision {
@@ -439,12 +627,34 @@ impl PlannerDatabase {
                     let next_title = title.as_deref().unwrap_or(&current.title);
                     let next_notes = notes.as_deref().unwrap_or(&current.notes);
                     let next_duration = duration_minutes.unwrap_or(current.duration_minutes);
+                    let next_reminder =
+                        apply_reminder_change(reminder_change, current.reminder_minutes_before)?;
                     validate_title(next_title)?;
+                    validate_notes(next_notes)?;
                     validate_duration(next_duration)?;
+                    if matches!(reminder_change, ReminderChange::Set { .. }) {
+                        validate_reminder_delivery_time(&current.start_at_utc, next_reminder)?;
+                    }
+                    let (reminder_status, notification_id) =
+                        reminder_outbox_values(&current.start_at_utc, next_reminder)?;
                     let count = transaction.execute(
-                        "UPDATE schedule_events SET title=?1, notes=?2, duration_minutes=?3, revision=revision+1, updated_at=?4
-                         WHERE id=?5 AND revision=?6",
-                        params![next_title.trim(), next_notes.trim(), next_duration, now(), event_id, expected_revision],
+                        "UPDATE schedule_events
+                         SET title=?1, notes=?2, duration_minutes=?3,
+                             reminder_minutes_before=?4, reminder_status=?5,
+                             notification_id=?6, reminder_last_error=NULL,
+                             revision=revision+1, updated_at=?7
+                         WHERE id=?8 AND revision=?9",
+                        params![
+                            next_title.trim(),
+                            next_notes.trim(),
+                            next_duration,
+                            next_reminder,
+                            reminder_status_string(&reminder_status),
+                            notification_id,
+                            now(),
+                            event_id,
+                            expected_revision
+                        ],
                     )?;
                     if count != 1 {
                         return Err(AppError::Conflict);
@@ -471,6 +681,7 @@ impl PlannerDatabase {
                     start_at_utc,
                     time_zone,
                     duration_minutes,
+                    reminder_change,
                 } => {
                     let current = event_by_id(&transaction, event_id)?.ok_or(AppError::NotFound)?;
                     if current.revision != *expected_revision {
@@ -483,10 +694,33 @@ impl PlannerDatabase {
                     validate_notes(next_notes)?;
                     let next_duration = duration_minutes.unwrap_or(current.duration_minutes);
                     validate_duration(next_duration)?;
+                    let next_reminder =
+                        apply_reminder_change(reminder_change, current.reminder_minutes_before)?;
+                    if matches!(reminder_change, ReminderChange::Set { .. }) {
+                        validate_reminder_delivery_time(&start, next_reminder)?;
+                    }
+                    let (reminder_status, notification_id) =
+                        reminder_outbox_values(&start, next_reminder)?;
                     let count = transaction.execute(
-                        "UPDATE schedule_events SET title=?1, notes=?2, start_at_utc=?3, time_zone=?4, duration_minutes=?5, revision=revision+1, updated_at=?6
-                         WHERE id=?7 AND revision=?8",
-                        params![next_title.trim(), next_notes.trim(), start, zone, next_duration, now(), event_id, expected_revision],
+                        "UPDATE schedule_events
+                         SET title=?1, notes=?2, start_at_utc=?3, time_zone=?4,
+                             duration_minutes=?5, reminder_minutes_before=?6,
+                             reminder_status=?7, notification_id=?8, reminder_last_error=NULL,
+                             revision=revision+1, updated_at=?9
+                         WHERE id=?10 AND revision=?11",
+                        params![
+                            next_title.trim(),
+                            next_notes.trim(),
+                            start,
+                            zone,
+                            next_duration,
+                            next_reminder,
+                            reminder_status_string(&reminder_status),
+                            notification_id,
+                            now(),
+                            event_id,
+                            expected_revision
+                        ],
                     )?;
                     if count != 1 {
                         return Err(AppError::Conflict);
@@ -524,6 +758,7 @@ struct PreparedEvent {
     start_at_utc: String,
     time_zone: String,
     duration_minutes: i64,
+    reminder_minutes_before: Option<i64>,
 }
 
 impl PreparedEvent {
@@ -534,6 +769,7 @@ impl PreparedEvent {
             &input.start_at_utc,
             &input.time_zone,
             input.duration_minutes,
+            input.reminder_minutes_before,
         )
     }
 
@@ -543,17 +779,20 @@ impl PreparedEvent {
         start_at_utc: &str,
         time_zone: &str,
         duration_minutes: i64,
+        reminder_minutes_before: Option<i64>,
     ) -> AppResult<Self> {
         validate_title(title)?;
         validate_notes(notes)?;
         let (start_at_utc, time_zone) = validate_time(start_at_utc, time_zone)?;
         validate_duration(duration_minutes)?;
+        validate_reminder(reminder_minutes_before)?;
         Ok(Self {
             title: title.trim().to_string(),
             notes: notes.trim().to_string(),
             start_at_utc,
             time_zone,
             duration_minutes,
+            reminder_minutes_before,
         })
     }
 }
@@ -580,10 +819,27 @@ fn insert_event<C: SqlConnection>(
 ) -> AppResult<ScheduleEvent> {
     let id = Uuid::new_v4().to_string();
     let timestamp = now();
+    validate_reminder_delivery_time(&input.start_at_utc, input.reminder_minutes_before)?;
+    let (reminder_status, notification_id) =
+        reminder_outbox_values(&input.start_at_utc, input.reminder_minutes_before)?;
     connection.connection().execute(
-        "INSERT INTO schedule_events (id, title, notes, start_at_utc, time_zone, duration_minutes, revision, created_at, updated_at)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, 1, ?7, ?7)",
-        params![id, input.title, input.notes, input.start_at_utc, input.time_zone, input.duration_minutes, timestamp],
+        "INSERT INTO schedule_events
+         (id, title, notes, start_at_utc, time_zone, duration_minutes,
+          reminder_minutes_before, reminder_status, notification_id,
+          revision, created_at, updated_at)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, 1, ?10, ?10)",
+        params![
+            id,
+            input.title,
+            input.notes,
+            input.start_at_utc,
+            input.time_zone,
+            input.duration_minutes,
+            input.reminder_minutes_before,
+            reminder_status_string(&reminder_status),
+            notification_id,
+            timestamp
+        ],
     )?;
     event_by_id(connection, &id)?.ok_or(AppError::NotFound)
 }
@@ -592,7 +848,8 @@ fn event_by_id<C: SqlConnection>(connection: &C, id: &str) -> AppResult<Option<S
     connection
         .connection()
         .query_row(
-            "SELECT id, title, notes, start_at_utc, time_zone, duration_minutes, revision, created_at, updated_at
+            "SELECT id, title, notes, start_at_utc, time_zone, duration_minutes,
+                    reminder_minutes_before, reminder_status, revision, created_at, updated_at
              FROM schedule_events WHERE id = ?1",
             params![id],
             event_from_row,
@@ -609,10 +866,42 @@ fn event_from_row(row: &Row<'_>) -> rusqlite::Result<ScheduleEvent> {
         start_at_utc: row.get(3)?,
         time_zone: row.get(4)?,
         duration_minutes: row.get(5)?,
-        revision: row.get(6)?,
-        created_at: row.get(7)?,
-        updated_at: row.get(8)?,
+        reminder_minutes_before: row.get(6)?,
+        reminder_status: reminder_status_from_row(row.get::<_, String>(7)?)?,
+        revision: row.get(8)?,
+        created_at: row.get(9)?,
+        updated_at: row.get(10)?,
     })
+}
+
+fn reminder_status_from_row(value: String) -> rusqlite::Result<ReminderStatus> {
+    match value.as_str() {
+        "none" => Ok(ReminderStatus::None),
+        "pending" => Ok(ReminderStatus::Pending),
+        "scheduled" => Ok(ReminderStatus::Scheduled),
+        "needs_permission" => Ok(ReminderStatus::NeedsPermission),
+        "error" => Ok(ReminderStatus::Error),
+        "expired" => Ok(ReminderStatus::Expired),
+        _ => Err(rusqlite::Error::FromSqlConversionFailure(
+            7,
+            Type::Text,
+            Box::new(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                "invalid reminder status",
+            )),
+        )),
+    }
+}
+
+fn reminder_status_string(status: &ReminderStatus) -> &'static str {
+    match status {
+        ReminderStatus::None => "none",
+        ReminderStatus::Pending => "pending",
+        ReminderStatus::Scheduled => "scheduled",
+        ReminderStatus::NeedsPermission => "needs_permission",
+        ReminderStatus::Error => "error",
+        ReminderStatus::Expired => "expired",
+    }
 }
 
 fn task_from_row(row: &Row<'_>) -> rusqlite::Result<DailyTask> {
@@ -672,6 +961,7 @@ fn validate_operations(operations: &[MutationOperation]) -> AppResult<()> {
                 start_at_utc,
                 time_zone,
                 duration_minutes,
+                reminder_minutes_before,
             } => {
                 PreparedEvent::from_parts(
                     title,
@@ -679,6 +969,7 @@ fn validate_operations(operations: &[MutationOperation]) -> AppResult<()> {
                     start_at_utc,
                     time_zone,
                     *duration_minutes,
+                    *reminder_minutes_before,
                 )?;
             }
             MutationOperation::UpdateEvent {
@@ -687,6 +978,7 @@ fn validate_operations(operations: &[MutationOperation]) -> AppResult<()> {
                 title,
                 notes,
                 duration_minutes,
+                reminder_change,
             } => {
                 validate_id(event_id)?;
                 validate_revision(*expected_revision)?;
@@ -699,7 +991,12 @@ fn validate_operations(operations: &[MutationOperation]) -> AppResult<()> {
                 if let Some(duration) = duration_minutes {
                     validate_duration(*duration)?;
                 }
-                if title.is_none() && notes.is_none() && duration_minutes.is_none() {
+                validate_reminder_change(reminder_change)?;
+                if title.is_none()
+                    && notes.is_none()
+                    && duration_minutes.is_none()
+                    && reminder_change == &ReminderChange::Unchanged
+                {
                     return Err(AppError::Validation(
                         "An event update must change at least one permitted field.".into(),
                     ));
@@ -720,6 +1017,7 @@ fn validate_operations(operations: &[MutationOperation]) -> AppResult<()> {
                 start_at_utc,
                 time_zone,
                 duration_minutes,
+                reminder_change,
             } => {
                 validate_id(event_id)?;
                 validate_revision(*expected_revision)?;
@@ -733,6 +1031,7 @@ fn validate_operations(operations: &[MutationOperation]) -> AppResult<()> {
                 if let Some(duration) = duration_minutes {
                     validate_duration(*duration)?;
                 }
+                validate_reminder_change(reminder_change)?;
             }
         }
     }
@@ -789,6 +1088,69 @@ fn validate_duration(value: i64) -> AppResult<()> {
         ));
     }
     Ok(())
+}
+
+fn validate_reminder(value: Option<i64>) -> AppResult<()> {
+    if value.is_some_and(|minutes| !(0..=MAX_REMINDER_MINUTES).contains(&minutes)) {
+        return Err(AppError::Validation(
+            "A reminder must be between the event start and seven days beforehand.".into(),
+        ));
+    }
+    Ok(())
+}
+
+fn validate_reminder_change(change: &ReminderChange) -> AppResult<()> {
+    match change {
+        ReminderChange::Set { minutes_before } => validate_reminder(Some(*minutes_before)),
+        ReminderChange::Unchanged | ReminderChange::Clear => Ok(()),
+    }
+}
+
+fn apply_reminder_change(change: &ReminderChange, current: Option<i64>) -> AppResult<Option<i64>> {
+    validate_reminder_change(change)?;
+    Ok(match change {
+        ReminderChange::Unchanged => current,
+        ReminderChange::Clear => None,
+        ReminderChange::Set { minutes_before } => Some(*minutes_before),
+    })
+}
+
+fn reminder_fire_time(start_at_utc: &str, minutes_before: i64) -> AppResult<DateTime<Utc>> {
+    let start = DateTime::parse_from_rfc3339(start_at_utc)
+        .map_err(|_| AppError::Validation("The reminder has an invalid event start time.".into()))?
+        .with_timezone(&Utc);
+    Ok(start - ChronoDuration::minutes(minutes_before))
+}
+
+fn validate_reminder_delivery_time(
+    start_at_utc: &str,
+    minutes_before: Option<i64>,
+) -> AppResult<()> {
+    validate_reminder(minutes_before)?;
+    if let Some(minutes) = minutes_before {
+        if reminder_fire_time(start_at_utc, minutes)? <= Utc::now() {
+            return Err(AppError::Validation(
+                "That reminder time has already passed. Choose a later event or a shorter reminder."
+                    .into(),
+            ));
+        }
+    }
+    Ok(())
+}
+
+fn reminder_outbox_values(
+    start_at_utc: &str,
+    minutes_before: Option<i64>,
+) -> AppResult<(ReminderStatus, Option<String>)> {
+    validate_reminder(minutes_before)?;
+    let Some(minutes) = minutes_before else {
+        return Ok((ReminderStatus::None, None));
+    };
+    if reminder_fire_time(start_at_utc, minutes)? <= Utc::now() {
+        Ok((ReminderStatus::Expired, None))
+    } else {
+        Ok((ReminderStatus::Pending, Some(Uuid::new_v4().to_string())))
+    }
 }
 
 fn validate_id(id: &str) -> AppResult<()> {
@@ -856,8 +1218,9 @@ fn migrate(connection: &Connection, from_version: u32) -> AppResult<()> {
     let result = (|| {
         if from_version == 0 {
             PlannerDatabase::create_latest_schema(connection)?;
-            connection.pragma_update(None, "user_version", CURRENT_SCHEMA_VERSION)?;
         }
+        ensure_reminder_columns(connection)?;
+        connection.pragma_update(None, "user_version", CURRENT_SCHEMA_VERSION)?;
         Ok::<(), AppError>(())
     })();
     match result {
@@ -870,6 +1233,51 @@ fn migrate(connection: &Connection, from_version: u32) -> AppResult<()> {
             Err(error)
         }
     }
+}
+
+fn ensure_reminder_columns(connection: &Connection) -> AppResult<()> {
+    if !column_exists(connection, "schedule_events", "reminder_minutes_before")? {
+        connection.execute(
+            "ALTER TABLE schedule_events ADD COLUMN reminder_minutes_before INTEGER
+             CHECK(reminder_minutes_before BETWEEN 0 AND 10080)",
+            [],
+        )?;
+    }
+    if !column_exists(connection, "schedule_events", "reminder_status")? {
+        connection.execute(
+            "ALTER TABLE schedule_events ADD COLUMN reminder_status TEXT NOT NULL DEFAULT 'none'",
+            [],
+        )?;
+    }
+    if !column_exists(connection, "schedule_events", "notification_id")? {
+        connection.execute(
+            "ALTER TABLE schedule_events ADD COLUMN notification_id TEXT",
+            [],
+        )?;
+    }
+    if !column_exists(connection, "schedule_events", "reminder_last_error")? {
+        connection.execute(
+            "ALTER TABLE schedule_events ADD COLUMN reminder_last_error TEXT",
+            [],
+        )?;
+    }
+    connection.execute(
+        "CREATE UNIQUE INDEX IF NOT EXISTS schedule_events_notification_idx
+         ON schedule_events(notification_id) WHERE notification_id IS NOT NULL",
+        [],
+    )?;
+    Ok(())
+}
+
+fn column_exists(connection: &Connection, table: &str, column: &str) -> AppResult<bool> {
+    let mut statement = connection.prepare(&format!("PRAGMA table_info({table})"))?;
+    let columns = statement.query_map([], |row| row.get::<_, String>(1))?;
+    for existing in columns {
+        if existing? == column {
+            return Ok(true);
+        }
+    }
+    Ok(false)
 }
 
 fn verify_integrity(connection: &Connection) -> AppResult<()> {
@@ -982,7 +1390,7 @@ pub fn restore_backup(path: &Path, backup_name: &str) -> AppResult<()> {
 }
 
 fn validate_export_bundle(bundle: &ExportBundle) -> AppResult<()> {
-    if bundle.format_version != EXPORT_FORMAT_VERSION {
+    if !matches!(bundle.format_version, 1 | EXPORT_FORMAT_VERSION) {
         return Err(AppError::Validation(format!(
             "Unsupported DayPlan export format {}.",
             bundle.format_version
@@ -1006,6 +1414,13 @@ fn validate_export_bundle(bundle: &ExportBundle) -> AppResult<()> {
         validate_notes(&event.notes)?;
         validate_time(&event.start_at_utc, &event.time_zone)?;
         validate_duration(event.duration_minutes)?;
+        validate_reminder(event.reminder_minutes_before)?;
+        if event.reminder_minutes_before.is_none() && event.reminder_status != ReminderStatus::None
+        {
+            return Err(AppError::Validation(
+                "An imported reminder status does not match its event.".into(),
+            ));
+        }
         validate_revision(event.revision)?;
         validate_timestamp(&event.created_at)?;
         validate_timestamp(&event.updated_at)?;
@@ -1101,7 +1516,12 @@ mod tests {
             start_at_utc: start.into(),
             time_zone: "America/New_York".into(),
             duration_minutes: 60,
+            reminder_minutes_before: None,
         }
+    }
+
+    fn future_start(hours: i64) -> String {
+        utc_string(Utc::now() + ChronoDuration::hours(hours))
     }
 
     #[test]
@@ -1135,6 +1555,7 @@ mod tests {
                     start_at_utc: "2026-08-13T18:00:00Z".into(),
                     time_zone: "America/New_York".into(),
                     duration_minutes: 60,
+                    reminder_minutes_before: None,
                 },
                 MutationOperation::RescheduleEvent {
                     event_id: existing.id,
@@ -1144,6 +1565,7 @@ mod tests {
                     start_at_utc: "2026-08-13T22:00:00Z".into(),
                     time_zone: "America/New_York".into(),
                     duration_minutes: None,
+                    reminder_change: ReminderChange::Unchanged,
                 },
             ],
         );
@@ -1170,6 +1592,47 @@ mod tests {
 
         let migrated = PlannerDatabase::open(&path).unwrap();
         assert_eq!(migrated.schema_version().unwrap(), CURRENT_SCHEMA_VERSION);
+        assert_eq!(migrated.list_backups().unwrap().len(), 1);
+    }
+
+    #[test]
+    fn migrates_schema_one_events_to_reminder_outbox_columns() {
+        let directory = tempdir().unwrap().keep();
+        let path = directory.join("dayplan.sqlite3");
+        let connection = Connection::open(&path).unwrap();
+        connection
+            .execute_batch(
+                "CREATE TABLE schedule_events (
+                    id TEXT PRIMARY KEY NOT NULL, title TEXT NOT NULL,
+                    notes TEXT NOT NULL DEFAULT '', start_at_utc TEXT NOT NULL,
+                    time_zone TEXT NOT NULL, duration_minutes INTEGER NOT NULL,
+                    revision INTEGER NOT NULL DEFAULT 1, created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL
+                 );
+                 CREATE TABLE daily_tasks (
+                    id TEXT PRIMARY KEY NOT NULL, title TEXT NOT NULL, day TEXT NOT NULL,
+                    completed INTEGER NOT NULL DEFAULT 0, completed_at TEXT,
+                    sort_order INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL
+                 );
+                 PRAGMA user_version = 1;",
+            )
+            .unwrap();
+        connection
+            .execute(
+                "INSERT INTO schedule_events
+                 (id, title, notes, start_at_utc, time_zone, duration_minutes, revision, created_at, updated_at)
+                 VALUES (?1, 'Gym', '', '2030-05-10T22:00:00.000Z', 'America/New_York', 60, 1, ?2, ?2)",
+                params![Uuid::new_v4().to_string(), "2026-08-13T12:00:00.000Z"],
+            )
+            .unwrap();
+        drop(connection);
+
+        let migrated = PlannerDatabase::open(&path).unwrap();
+        assert_eq!(migrated.schema_version().unwrap(), 2);
+        let event = migrated.all_events().unwrap().remove(0);
+        assert_eq!(event.reminder_minutes_before, None);
+        assert_eq!(event.reminder_status, ReminderStatus::None);
         assert_eq!(migrated.list_backups().unwrap().len(), 1);
     }
 
@@ -1210,6 +1673,7 @@ mod tests {
                 start_at_utc: Some("2026-08-13T23:00:00Z".into()),
                 time_zone: Some("America/Chicago".into()),
                 duration_minutes: Some(75),
+                reminder_change: ReminderChange::Unchanged,
             })
             .unwrap();
         assert_eq!(updated.revision, 2);
@@ -1217,6 +1681,116 @@ mod tests {
         assert_eq!(updated.start_at_utc, "2026-08-13T23:00:00.000Z");
         assert_eq!(updated.time_zone, "America/Chicago");
         assert_eq!(updated.duration_minutes, 75);
+    }
+
+    #[test]
+    fn a_reminder_is_revision_checked_in_the_same_event_transaction() {
+        let mut database = database();
+        let start = future_start(48);
+        let original = database
+            .create_event(event_input("Release", &start))
+            .unwrap();
+        let updated = database
+            .update_event(UpdateEventInput {
+                id: original.id.clone(),
+                revision: original.revision,
+                title: Some("Release review".into()),
+                notes: None,
+                start_at_utc: None,
+                time_zone: None,
+                duration_minutes: None,
+                reminder_change: ReminderChange::Set { minutes_before: 30 },
+            })
+            .unwrap();
+        assert_eq!(updated.revision, 2);
+        assert_eq!(updated.reminder_minutes_before, Some(30));
+        assert_eq!(updated.reminder_status, ReminderStatus::Pending);
+
+        let stale = database.update_event(UpdateEventInput {
+            id: original.id,
+            revision: 1,
+            title: None,
+            notes: None,
+            start_at_utc: None,
+            time_zone: None,
+            duration_minutes: None,
+            reminder_change: ReminderChange::Clear,
+        });
+        assert!(matches!(stale, Err(AppError::Conflict)));
+        assert_eq!(
+            database.all_events().unwrap()[0].reminder_minutes_before,
+            Some(30)
+        );
+    }
+
+    #[test]
+    fn reminder_outbox_reconciles_and_marks_due_delivery_once() {
+        let mut database = database();
+        let mut input = event_input("Standup", &future_start(1));
+        input.reminder_minutes_before = Some(0);
+        let event = database.create_event(input).unwrap();
+        database
+            .connection
+            .execute(
+                "UPDATE schedule_events
+                 SET start_at_utc=?1, reminder_status='pending'
+                 WHERE id=?2",
+                params![
+                    utc_string(Utc::now() - ChronoDuration::minutes(1)),
+                    event.id
+                ],
+            )
+            .unwrap();
+        database.reconcile_reminders().unwrap();
+        let due = database.due_reminders(10).unwrap();
+        assert_eq!(due.len(), 1);
+        database.mark_reminder_delivered(&due[0]).unwrap();
+        assert!(database.due_reminders(10).unwrap().is_empty());
+        assert_eq!(
+            database.all_events().unwrap()[0].reminder_status,
+            ReminderStatus::Expired
+        );
+    }
+
+    #[test]
+    fn import_regenerates_internal_notification_identifiers() {
+        let mut database = database();
+        let mut input = event_input("Flight", &future_start(72));
+        input.reminder_minutes_before = Some(60);
+        let event = database.create_event(input).unwrap();
+        let before: String = database
+            .connection
+            .query_row(
+                "SELECT notification_id FROM schedule_events WHERE id=?1",
+                params![event.id],
+                |row| row.get(0),
+            )
+            .unwrap();
+        let bundle = database.export_bundle().unwrap();
+        database.import_bundle(&bundle).unwrap();
+        let after: String = database
+            .connection
+            .query_row(
+                "SELECT notification_id FROM schedule_events WHERE id=?1",
+                params![event.id],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_ne!(before, after);
+        assert_eq!(
+            database.all_events().unwrap()[0].reminder_status,
+            ReminderStatus::Pending
+        );
+    }
+
+    #[test]
+    fn reminder_offsets_are_limited_to_seven_days() {
+        let mut input = event_input("Trip", &future_start(240));
+        input.reminder_minutes_before = Some(MAX_REMINDER_MINUTES + 1);
+        assert!(matches!(
+            database().create_event(input),
+            Err(AppError::Validation(_))
+        ));
     }
 
     #[test]
@@ -1229,6 +1803,7 @@ mod tests {
                 start_at_utc: "2026-08-13T03:30:00Z".into(),
                 time_zone: "America/New_York".into(),
                 duration_minutes: 180,
+                reminder_minutes_before: None,
             })
             .unwrap();
         assert_eq!(

@@ -2,7 +2,7 @@ use crate::db::validate_model_response;
 use crate::error::{AppError, AppResult};
 use crate::model::{
     ModelResponse, MutationOperation, PlannerResponse, ScheduleEvent, MAX_COMMAND_LENGTH,
-    MAX_NOTES_LENGTH, MAX_OPERATIONS, MAX_TITLE_LENGTH,
+    MAX_NOTES_LENGTH, MAX_OPERATIONS, MAX_REMINDER_MINUTES, MAX_TITLE_LENGTH,
 };
 use chrono::{DateTime, Duration as ChronoDuration, SecondsFormat, Utc};
 use reqwest::Client;
@@ -469,6 +469,13 @@ fn preflight(
     if lower.starts_with("mark ") || lower.contains(" complete") {
         return Some(ModelResponse::Clarification { question: "This assistant can change timed events, not daily task completion. Please use the task checklist for that.".into() });
     }
+    if (lower.contains("task") || lower.contains("checklist")) && lower.contains("remind") {
+        return Some(ModelResponse::Clarification {
+            question:
+                "Task reminders are not supported. Which timed event should have the reminder?"
+                    .into(),
+        });
+    }
     if (lower.contains("move it") || lower.contains("reschedule it")) && !has_memory {
         return Some(ModelResponse::Clarification {
             question: "Which earlier schedule change does “it” refer to?".into(),
@@ -652,7 +659,7 @@ fn has_date_reference(command: &str) -> bool {
 }
 
 fn system_instruction() -> String {
-    "You are DayPlan's local schedule interpreter. You must use only the propose_schedule_changes tool exactly once. You never edit data and you may only return the four permitted event operations. Use only supplied event IDs and exact revisions. Produce a clarification instead of guessing when a title can identify multiple events, a date/time is missing or ambiguous, an event is absent, or the request is outside event scheduling. A proposal must be complete and replace any prior pending proposal: do not apply a safe subset of a compound request. Times must be ISO-8601 UTC timestamps with Z. Do not alter daily tasks. Use recent structured turns and the prior pending proposal only to resolve an explicit follow-up or clarification answer."
+    "You are DayPlan's local schedule interpreter. You must use only the propose_schedule_changes tool exactly once. You never edit data and you may only return the four permitted event operations. Use only supplied event IDs and exact revisions. Produce a clarification instead of guessing when a title can identify multiple events, a date/time is missing or ambiguous, an event is absent, or the request is outside event scheduling. A proposal must be complete and replace any prior pending proposal: do not apply a safe subset of a compound request. Times must be ISO-8601 UTC timestamps with Z. Event reminders use minutesBefore from 0 through 10080; create defaults to null and an unchanged reminder must use {\"action\":\"unchanged\"}. Do not alter daily tasks or create task reminders. Use recent structured turns and the prior pending proposal only to resolve an explicit follow-up or clarification answer."
         .into()
 }
 
@@ -674,7 +681,9 @@ fn planner_context(
                 "title": event.title,
                 "startAtUtc": event.start_at_utc,
                 "timeZone": event.time_zone,
-                "durationMinutes": event.duration_minutes
+                "durationMinutes": event.duration_minutes,
+                "reminderMinutesBefore": event.reminder_minutes_before,
+                "reminderStatus": event.reminder_status
             })
         })
         .collect::<Vec<_>>();
@@ -694,6 +703,30 @@ fn proposal_schema() -> Value {
         "eventId": { "type": "string", "format": "uuid" },
         "expectedRevision": { "type": "integer", "minimum": 1 }
     });
+    let reminder_change = json!({
+        "oneOf": [
+            {
+                "type": "object", "additionalProperties": false,
+                "properties": { "action": { "const": "unchanged" } },
+                "required": ["action"]
+            },
+            {
+                "type": "object", "additionalProperties": false,
+                "properties": { "action": { "const": "clear" } },
+                "required": ["action"]
+            },
+            {
+                "type": "object", "additionalProperties": false,
+                "properties": {
+                    "action": { "const": "set" },
+                    "minutesBefore": {
+                        "type": "integer", "minimum": 0, "maximum": MAX_REMINDER_MINUTES
+                    }
+                },
+                "required": ["action", "minutesBefore"]
+            }
+        ]
+    });
     json!({
         "oneOf": [
             {
@@ -709,15 +742,17 @@ fn proposal_schema() -> Value {
                                 "title": { "type": "string", "minLength": 1, "maxLength": MAX_TITLE_LENGTH },
                                 "notes": { "type": "string", "maxLength": MAX_NOTES_LENGTH },
                                 "startAtUtc": { "type": "string" }, "timeZone": { "type": "string" },
-                                "durationMinutes": { "type": "integer", "minimum": 5, "maximum": 1440 }
-                            }, "required": ["type", "title", "notes", "startAtUtc", "timeZone", "durationMinutes"] },
+                                "durationMinutes": { "type": "integer", "minimum": 5, "maximum": 1440 },
+                                "reminderMinutesBefore": { "type": ["integer", "null"], "minimum": 0, "maximum": MAX_REMINDER_MINUTES }
+                            }, "required": ["type", "title", "notes", "startAtUtc", "timeZone", "durationMinutes", "reminderMinutesBefore"] },
                             { "type": "object", "additionalProperties": false, "properties": {
                                 "type": { "const": "update_event" }, "eventId": event_ref["eventId"].clone(),
                                 "expectedRevision": event_ref["expectedRevision"].clone(),
                                 "title": { "type": ["string", "null"], "maxLength": MAX_TITLE_LENGTH },
                                 "notes": { "type": ["string", "null"], "maxLength": MAX_NOTES_LENGTH },
-                                "durationMinutes": { "type": ["integer", "null"], "minimum": 5, "maximum": 1440 }
-                            }, "required": ["type", "eventId", "expectedRevision", "title", "notes", "durationMinutes"] },
+                                "durationMinutes": { "type": ["integer", "null"], "minimum": 5, "maximum": 1440 },
+                                "reminderChange": reminder_change.clone()
+                            }, "required": ["type", "eventId", "expectedRevision", "title", "notes", "durationMinutes", "reminderChange"] },
                             { "type": "object", "additionalProperties": false, "properties": {
                                 "type": { "const": "delete_event" }, "eventId": event_ref["eventId"].clone(),
                                 "expectedRevision": event_ref["expectedRevision"].clone()
@@ -728,8 +763,9 @@ fn proposal_schema() -> Value {
                                 "title": { "type": ["string", "null"], "maxLength": MAX_TITLE_LENGTH },
                                 "notes": { "type": ["string", "null"], "maxLength": MAX_NOTES_LENGTH },
                                 "startAtUtc": { "type": "string" }, "timeZone": { "type": "string" },
-                                "durationMinutes": { "type": ["integer", "null"], "minimum": 5, "maximum": 1440 }
-                            }, "required": ["type", "eventId", "expectedRevision", "title", "notes", "startAtUtc", "timeZone", "durationMinutes"] }
+                                "durationMinutes": { "type": ["integer", "null"], "minimum": 5, "maximum": 1440 },
+                                "reminderChange": reminder_change
+                            }, "required": ["type", "eventId", "expectedRevision", "title", "notes", "startAtUtc", "timeZone", "durationMinutes", "reminderChange"] }
                         ] }
                     }
                 }, "required": ["kind", "summary", "operations"]
@@ -827,6 +863,8 @@ mod tests {
             start_at_utc: "2026-08-12T22:00:00.000Z".into(),
             time_zone: "America/New_York".into(),
             duration_minutes: 60,
+            reminder_minutes_before: None,
+            reminder_status: crate::model::ReminderStatus::None,
             revision: 1,
             created_at: "2026-08-12T10:00:00.000Z".into(),
             updated_at: "2026-08-12T10:00:00.000Z".into(),
@@ -889,6 +927,65 @@ mod tests {
     }
 
     #[test]
+    fn reminder_tool_fields_are_strict_and_bounded() {
+        let valid = serde_json::from_value::<ModelResponse>(json!({
+            "kind": "proposal",
+            "summary": "Remind before gym",
+            "operations": [{
+                "type": "update_event",
+                "eventId": "30bb9c6a-4020-45a6-806b-5eb71c7ae76f",
+                "expectedRevision": 1,
+                "title": null,
+                "notes": null,
+                "durationMinutes": null,
+                "reminderChange": { "action": "set", "minutesBefore": 15 }
+            }]
+        }))
+        .unwrap();
+        assert!(validate_model_response(&valid).is_ok());
+
+        let oversized = serde_json::from_value::<ModelResponse>(json!({
+            "kind": "proposal",
+            "summary": "Remind before gym",
+            "operations": [{
+                "type": "update_event",
+                "eventId": "30bb9c6a-4020-45a6-806b-5eb71c7ae76f",
+                "expectedRevision": 1,
+                "title": null,
+                "notes": null,
+                "durationMinutes": null,
+                "reminderChange": { "action": "set", "minutesBefore": 10081 }
+            }]
+        }))
+        .unwrap();
+        assert!(validate_model_response(&oversized).is_err());
+        assert!(serde_json::from_value::<ModelResponse>(json!({
+            "kind": "proposal",
+            "summary": "Remind before gym",
+            "operations": [{
+                "type": "update_event",
+                "eventId": "30bb9c6a-4020-45a6-806b-5eb71c7ae76f",
+                "expectedRevision": 1,
+                "title": null,
+                "notes": null,
+                "durationMinutes": null,
+                "reminderChange": { "action": "snooze", "minutesBefore": 15 }
+            }]
+        }))
+        .is_err());
+    }
+
+    #[test]
+    fn task_reminders_are_explicitly_unsupported() {
+        let response =
+            PlannerAgent::default().preflight("remind me about my buy milk task tomorrow", &[]);
+        assert!(matches!(
+            response,
+            Some(ModelResponse::Clarification { .. })
+        ));
+    }
+
+    #[test]
     fn multiple_tool_calls_are_rejected() {
         let tool = OllamaToolCall {
             function: OllamaFunctionCall {
@@ -930,6 +1027,7 @@ mod tests {
                         start_at_utc: "2026-08-13T16:00:00Z".into(),
                         time_zone: "America/New_York".into(),
                         duration_minutes: 60,
+                        reminder_minutes_before: None,
                     }],
                 ),
             )

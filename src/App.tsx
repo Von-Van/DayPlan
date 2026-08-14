@@ -1,21 +1,33 @@
 import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
+import { isPermissionGranted, requestPermission } from "@tauri-apps/plugin-notification";
 import {
-  ArrowLeft, ArrowRight, Bot, CalendarDays, Check, ChevronDown, CirclePlus, Clock3,
+  ArrowLeft, ArrowRight, Bell, Bot, CalendarDays, Check, ChevronDown, CirclePlus, Clock3,
   Command, ExternalLink, LoaderCircle, MoreHorizontal, Plus, RotateCcw, Sparkles,
   Trash2, TriangleAlert, X
 } from "lucide-react";
-import { api, DailyTask, LocalDateTimeResolution, OllamaStatus, PlannerResponse, ScheduleEvent } from "./api";
+import { api, DailyTask, LocalDateTimeResolution, OllamaStatus, PlannerResponse, ReminderChange, ScheduleEvent } from "./api";
 import { dateTimeFields, dayLabel, dayShort, localTimeZone, offsetDay, timeLabel, todayDay } from "./date";
 
-type DraftEvent = { title: string; notes: string; day: string; time: string; durationMinutes: number };
+type DraftEvent = { title: string; notes: string; day: string; time: string; durationMinutes: number; reminderMinutesBefore: number | null };
 
 const defaultAgenda = { events: [] as ScheduleEvent[], tasks: [] as DailyTask[] };
 
 function draftFor(day: string, event?: ScheduleEvent): DraftEvent {
-  if (!event) return { title: "", notes: "", day, time: "09:00", durationMinutes: 60 };
+  if (!event) return { title: "", notes: "", day, time: "09:00", durationMinutes: 60, reminderMinutesBefore: null };
   const fields = dateTimeFields(event.startAtUtc);
-  return { title: event.title, notes: event.notes, day: fields.day, time: fields.time, durationMinutes: event.durationMinutes };
+  return { title: event.title, notes: event.notes, day: fields.day, time: fields.time, durationMinutes: event.durationMinutes, reminderMinutesBefore: event.reminderMinutesBefore };
 }
+
+const reminderPresets = [
+  { value: "", label: "No reminder" },
+  { value: "0", label: "At start time" },
+  { value: "5", label: "5 minutes before" },
+  { value: "10", label: "10 minutes before" },
+  { value: "15", label: "15 minutes before" },
+  { value: "30", label: "30 minutes before" },
+  { value: "60", label: "1 hour before" },
+  { value: "1440", label: "1 day before" }
+];
 
 export default function App() {
   const [day, setDay] = useState(todayDay());
@@ -50,8 +62,9 @@ export default function App() {
 
   async function saveEvent(draft: DraftEvent, event: ScheduleEvent | undefined, startAtUtc: string) {
     try {
+      if (draft.reminderMinutesBefore !== null) await ensureNotificationPermission();
       if (!event) {
-        await api.createEvent({ title: draft.title, notes: draft.notes, startAtUtc, timeZone: localTimeZone, durationMinutes: draft.durationMinutes });
+        await api.createEvent({ title: draft.title, notes: draft.notes, startAtUtc, timeZone: localTimeZone, durationMinutes: draft.durationMinutes, reminderMinutesBefore: draft.reminderMinutesBefore });
       } else {
         await api.updateEvent({
           id: event.id,
@@ -60,7 +73,8 @@ export default function App() {
           notes: draft.notes,
           startAtUtc,
           timeZone: localTimeZone,
-          durationMinutes: draft.durationMinutes
+          durationMinutes: draft.durationMinutes,
+          reminderChange: reminderChangeFor(event.reminderMinutesBefore, draft.reminderMinutesBefore)
         });
       }
       setEditor(null);
@@ -102,6 +116,7 @@ export default function App() {
     if (!agentResponse || agentResponse.kind !== "proposal") return;
     setIsApplying(true);
     try {
+      if (proposalEnablesReminder(agentResponse)) await ensureNotificationPermission();
       await api.apply(agentResponse.proposalId);
       setAgentResponse(null);
       setCommand("");
@@ -202,7 +217,7 @@ function EventRow({ event, onEdit, onDelete }: { event: ScheduleEvent; onEdit: (
     <time>{timeLabel(event.startAtUtc)}<span>{event.durationMinutes} min</span></time>
     <div className="event-connector"><i /></div>
     <button className="event-card" onClick={onEdit}>
-      <span className="event-swatch" /><span className="event-main"><strong>{event.title}</strong>{event.notes && <small>{event.notes}</small>}</span><ChevronDown size={16} />
+      <span className="event-swatch" /><span className="event-main"><strong>{event.title}</strong>{event.notes && <small>{event.notes}</small>}{event.reminderMinutesBefore !== null && <small className={`reminder-badge ${event.reminderStatus}`}><Bell size={11} /> {reminderLabel(event.reminderMinutesBefore)} · {event.reminderStatus.replace("_", " ")}</small>}</span><ChevronDown size={16} />
     </button>
     <button className="event-menu" onClick={onDelete} aria-label={`Delete ${event.title}`}><Trash2 size={15} /></button>
   </article>
@@ -220,7 +235,7 @@ function PlannerCard({ status, events, command, onCommand, onSubmit, thinking, r
     <div className="planner-heading"><div className="bot-orb"><Bot size={19} /></div><div><p>LOCAL PLANNER</p><h2>Say it messily.</h2></div><button onClick={onClear} title="Clear conversational context" className="reset-button"><RotateCcw size={15} /></button></div>
     <div className={`model-state ${ready ? "ready" : "not-ready"}`}><span /><div><strong>{ready ? "Local model ready" : "Ollama setup needed"}</strong><p>{status?.detail ?? "Checking your local model…"}</p></div><button onClick={onRefreshStatus} aria-label="Refresh model status"><RotateCcw size={14} /></button></div>
     <form onSubmit={onSubmit} className="command-form">
-      <textarea value={command} onChange={(event) => onCommand(event.target.value)} placeholder='“Move gym to 6pm tomorrow, add dentist Thursday…”' disabled={!ready || thinking} />
+      <textarea maxLength={1000} value={command} onChange={(event) => onCommand(event.target.value)} placeholder='“Move gym to 6pm tomorrow, add dentist Thursday…”' disabled={!ready || thinking} />
       <div><span><Command size={14} /> The model proposes; you decide.</span><button disabled={!command.trim() || !ready || thinking}>{thinking ? <LoaderCircle className="spin" size={16} /> : <Sparkles size={16} />} Plan changes</button></div>
     </form>
     {response?.kind === "clarification" && <div className="clarification"><span>?</span><p>{response.question}</p></div>}
@@ -244,7 +259,7 @@ function EventEditor({ day, event, onClose, onSave }: { day: string; event?: Sch
     } finally { setSaving(false); }
   }
   const updateDraft = (next: DraftEvent) => { setDraft(next); setResolution(null); };
-  return <div className="modal-backdrop" role="presentation"><form className="event-editor" onSubmit={submit} aria-label={event ? "Edit event" : "New event"}><header><div><p>{event ? "EDIT TIME BLOCK" : "NEW TIME BLOCK"}</p><h2>{event ? "Refine the details" : "Make room for it"}</h2></div><button type="button" onClick={onClose} aria-label="Close editor"><X size={19} /></button></header><label>Title<input autoFocus value={draft.title} onChange={(input) => updateDraft({ ...draft, title: input.target.value })} required maxLength={140} placeholder="What needs your time?" /></label><div className="form-pair"><label>Date<input type="date" value={draft.day} onChange={(input) => updateDraft({ ...draft, day: input.target.value })} required /></label><label>Time<input type="time" value={draft.time} onChange={(input) => updateDraft({ ...draft, time: input.target.value })} required /></label></div>{resolution?.kind === "nonexistent" && <div className="time-resolution" role="alert">{resolution.message}</div>}{resolution?.kind === "ambiguous" && <div className="time-resolution"><strong>This time happens twice.</strong><p>Choose which clock occurrence you mean:</p>{resolution.options.map((option) => <button type="button" key={option.startAtUtc} onClick={() => void persist(option.startAtUtc)}>{option.label}</button>)}</div>}<label>Duration <span>{draft.durationMinutes} minutes</span><input className="range" type="range" min="5" max="240" step="5" value={draft.durationMinutes} onChange={(input) => updateDraft({ ...draft, durationMinutes: Number(input.target.value) })} /></label><label>Notes<textarea value={draft.notes} onChange={(input) => updateDraft({ ...draft, notes: input.target.value })} placeholder="Optional context for your future self" maxLength={800} /></label><footer><button type="button" className="editor-cancel" onClick={onClose}>Cancel</button><button className="editor-save" disabled={saving || !draft.title.trim()}>{saving && <LoaderCircle className="spin" size={15} />}{event ? "Save changes" : "Create event"}</button></footer></form></div>;
+  return <div className="modal-backdrop" role="presentation"><form className="event-editor" onSubmit={submit} aria-label={event ? "Edit event" : "New event"}><header><div><p>{event ? "EDIT TIME BLOCK" : "NEW TIME BLOCK"}</p><h2>{event ? "Refine the details" : "Make room for it"}</h2></div><button type="button" onClick={onClose} aria-label="Close editor"><X size={19} /></button></header><label>Title<input autoFocus value={draft.title} onChange={(input) => updateDraft({ ...draft, title: input.target.value })} required maxLength={140} placeholder="What needs your time?" /></label><div className="form-pair"><label>Date<input type="date" value={draft.day} onChange={(input) => updateDraft({ ...draft, day: input.target.value })} required /></label><label>Time<input type="time" value={draft.time} onChange={(input) => updateDraft({ ...draft, time: input.target.value })} required /></label></div>{resolution?.kind === "nonexistent" && <div className="time-resolution" role="alert">{resolution.message}</div>}{resolution?.kind === "ambiguous" && <div className="time-resolution"><strong>This time happens twice.</strong><p>Choose which clock occurrence you mean:</p>{resolution.options.map((option) => <button type="button" key={option.startAtUtc} onClick={() => void persist(option.startAtUtc)}>{option.label}</button>)}</div>}<label>Duration <span>{draft.durationMinutes} minutes</span><input className="range" type="range" min="5" max="240" step="5" value={draft.durationMinutes} onChange={(input) => updateDraft({ ...draft, durationMinutes: Number(input.target.value) })} /></label><label>Reminder<select value={draft.reminderMinutesBefore ?? ""} onChange={(input) => updateDraft({ ...draft, reminderMinutesBefore: input.target.value === "" ? null : Number(input.target.value) })}>{reminderPresets.map((preset) => <option key={preset.value} value={preset.value}>{preset.label}</option>)}</select><span>DayPlan must remain running in the tray to deliver desktop reminders.</span></label><label>Notes<textarea value={draft.notes} onChange={(input) => updateDraft({ ...draft, notes: input.target.value })} placeholder="Optional context for your future self" maxLength={800} /></label><footer><button type="button" className="editor-cancel" onClick={onClose}>Cancel</button><button className="editor-save" disabled={saving || !draft.title.trim()}>{saving && <LoaderCircle className="spin" size={15} />}{event ? "Save changes" : "Create event"}</button></footer></form></div>;
 }
 
 function LoadingLine({ label }: { label: string }) { return <div className="loading-line"><LoaderCircle className="spin" size={18} />{label}</div>; }
@@ -252,11 +267,39 @@ function LoadingLine({ label }: { label: string }) { return <div className="load
 function operationLabel(operation: Extract<PlannerResponse, { kind: "proposal" }> ["operations"][number], events: ScheduleEvent[]) {
   const eventTitle = (id: string) => events.find((event) => event.id === id)?.title ?? "the selected event";
   switch (operation.type) {
-    case "create_event": return `Create “${operation.title}” at ${timeLabel(operation.startAtUtc)}`;
-    case "update_event": return `Update “${eventTitle(operation.eventId)}”`;
+    case "create_event": return `Create “${operation.title}” at ${timeLabel(operation.startAtUtc)}${operation.reminderMinutesBefore === null ? "" : ` with ${reminderLabel(operation.reminderMinutesBefore)}`}`;
+    case "update_event": return `Update “${eventTitle(operation.eventId)}”${operation.reminderChange.action === "set" ? ` with ${reminderLabel(operation.reminderChange.minutesBefore)}` : operation.reminderChange.action === "clear" ? " and clear its reminder" : ""}`;
     case "delete_event": return `Delete “${eventTitle(operation.eventId)}”`;
-    case "reschedule_event": return `Move “${eventTitle(operation.eventId)}” to ${timeLabel(operation.startAtUtc)}`;
+    case "reschedule_event": return `Move “${eventTitle(operation.eventId)}” to ${timeLabel(operation.startAtUtc)}${operation.reminderChange.action === "set" ? ` with ${reminderLabel(operation.reminderChange.minutesBefore)}` : operation.reminderChange.action === "clear" ? " and clear its reminder" : ""}`;
   }
+}
+
+function reminderChangeFor(current: number | null, next: number | null): ReminderChange {
+  if (current === next) return { action: "unchanged" };
+  return next === null ? { action: "clear" } : { action: "set", minutesBefore: next };
+}
+
+function proposalEnablesReminder(response: Extract<PlannerResponse, { kind: "proposal" }>) {
+  return response.operations.some((operation) =>
+    operation.type === "create_event"
+      ? operation.reminderMinutesBefore !== null
+      : (operation.type === "update_event" || operation.type === "reschedule_event") && operation.reminderChange.action === "set"
+  );
+}
+
+async function ensureNotificationPermission() {
+  if (await isPermissionGranted()) return;
+  const permission = await requestPermission();
+  if (permission !== "granted") {
+    throw new Error("Notification permission was not granted. No schedule changes were applied.");
+  }
+}
+
+function reminderLabel(minutes: number) {
+  if (minutes === 0) return "reminder at start";
+  if (minutes === 1_440) return "reminder 1 day before";
+  if (minutes === 60) return "reminder 1 hour before";
+  return `reminder ${minutes} minutes before`;
 }
 
 function messageFor(cause: unknown) { return cause instanceof Error ? cause.message : String(cause); }

@@ -8,10 +8,18 @@ export const eventSchema = z.object({
   startAtUtc: z.string().datetime({ offset: true }),
   timeZone: z.string(),
   durationMinutes: z.number().int().min(5).max(1440),
+  reminderMinutesBefore: z.number().int().min(0).max(10_080).nullable(),
+  reminderStatus: z.enum(["none", "pending", "scheduled", "needs_permission", "error", "expired"]),
   revision: z.number().int().positive(),
   createdAt: z.string().datetime({ offset: true }),
   updatedAt: z.string().datetime({ offset: true })
 }).strict();
+
+export const reminderChangeSchema = z.discriminatedUnion("action", [
+  z.object({ action: z.literal("unchanged") }).strict(),
+  z.object({ action: z.literal("clear") }).strict(),
+  z.object({ action: z.literal("set"), minutesBefore: z.number().int().min(0).max(10_080) }).strict()
+]);
 
 export const taskSchema = z.object({
   id: z.string().uuid(),
@@ -25,10 +33,10 @@ export const taskSchema = z.object({
 }).strict();
 
 export const operationSchema = z.discriminatedUnion("type", [
-  z.object({ type: z.literal("create_event"), title: z.string().min(1).max(140), notes: z.string(), startAtUtc: z.string().datetime({ offset: true }), timeZone: z.string(), durationMinutes: z.number().int().min(5).max(1440) }).strict(),
-  z.object({ type: z.literal("update_event"), eventId: z.string().uuid(), expectedRevision: z.number().int().positive(), title: z.string().nullable(), notes: z.string().nullable(), durationMinutes: z.number().int().min(5).max(1440).nullable() }).strict(),
+  z.object({ type: z.literal("create_event"), title: z.string().min(1).max(140), notes: z.string(), startAtUtc: z.string().datetime({ offset: true }), timeZone: z.string(), durationMinutes: z.number().int().min(5).max(1440), reminderMinutesBefore: z.number().int().min(0).max(10_080).nullable() }).strict(),
+  z.object({ type: z.literal("update_event"), eventId: z.string().uuid(), expectedRevision: z.number().int().positive(), title: z.string().nullable(), notes: z.string().nullable(), durationMinutes: z.number().int().min(5).max(1440).nullable(), reminderChange: reminderChangeSchema }).strict(),
   z.object({ type: z.literal("delete_event"), eventId: z.string().uuid(), expectedRevision: z.number().int().positive() }).strict(),
-  z.object({ type: z.literal("reschedule_event"), eventId: z.string().uuid(), expectedRevision: z.number().int().positive(), title: z.string().min(1).max(140).nullable(), notes: z.string().max(800).nullable(), startAtUtc: z.string().datetime({ offset: true }), timeZone: z.string(), durationMinutes: z.number().int().min(5).max(1440).nullable() }).strict()
+  z.object({ type: z.literal("reschedule_event"), eventId: z.string().uuid(), expectedRevision: z.number().int().positive(), title: z.string().min(1).max(140).nullable(), notes: z.string().max(800).nullable(), startAtUtc: z.string().datetime({ offset: true }), timeZone: z.string(), durationMinutes: z.number().int().min(5).max(1440).nullable(), reminderChange: reminderChangeSchema }).strict()
 ]);
 
 export const plannerResponseSchema = z.discriminatedUnion("kind", [
@@ -52,23 +60,31 @@ const localDateTimeResolutionSchema = z.discriminatedUnion("kind", [
 ]);
 const backupSchema = z.object({ name: z.string(), createdAt: z.string().datetime({ offset: true }), sizeBytes: z.number().nonnegative() }).strict();
 const databaseStatusSchema = z.object({ ready: z.boolean(), schemaVersion: z.number().int().nonnegative(), error: commandErrorSchema.nullable(), backups: z.array(backupSchema) }).strict();
-const exportBundleSchema = z.object({
+const legacyEventSchema = eventSchema.omit({ reminderMinutesBefore: true, reminderStatus: true });
+const exportBundleV1Schema = z.object({
   formatVersion: z.literal(1),
+  exportedAt: z.string().datetime({ offset: true }),
+  events: z.array(legacyEventSchema).max(100_000),
+  tasks: z.array(taskSchema).max(100_000)
+}).strict();
+const exportBundleV2Schema = z.object({
+  formatVersion: z.literal(2),
   exportedAt: z.string().datetime({ offset: true }),
   events: z.array(eventSchema).max(100_000),
   tasks: z.array(taskSchema).max(100_000)
 }).strict();
+const exportBundleSchema = z.discriminatedUnion("formatVersion", [exportBundleV1Schema, exportBundleV2Schema]);
 const importPreviewSchema = z.object({ eventCount: z.number().int().nonnegative(), taskCount: z.number().int().nonnegative(), earliestDay: z.string().nullable(), latestDay: z.string().nullable() }).strict();
 
 export type ScheduleEvent = z.infer<typeof eventSchema>;
 export type DailyTask = z.infer<typeof taskSchema>;
 export type PlannerResponse = z.infer<typeof plannerResponseSchema>;
+export type ReminderChange = z.infer<typeof reminderChangeSchema>;
 export type OllamaStatus = z.infer<typeof statusSchema>;
 export type CommandErrorPayload = z.infer<typeof commandErrorSchema>;
 export type LocalDateTimeResolution = z.infer<typeof localDateTimeResolutionSchema>;
 export type ExportBundle = z.infer<typeof exportBundleSchema>;
 export type DatabaseStatus = z.infer<typeof databaseStatusSchema>;
-export type EventInput = Omit<ScheduleEvent, "id" | "revision" | "createdAt" | "updatedAt">;
 
 export class DayPlanError extends Error {
   code: string;
@@ -98,16 +114,16 @@ export const api = {
   async listAgenda(day: string, timeZone: string) {
     return agendaSchema.parse(await invokeCommand("list_agenda", { day, timeZone }));
   },
-  async createEvent(input: Pick<EventInput, "title" | "notes" | "startAtUtc" | "timeZone" | "durationMinutes">) {
+  async createEvent(input: { title: string; notes: string; startAtUtc: string; timeZone: string; durationMinutes: number; reminderMinutesBefore: number | null }) {
     return eventSchema.parse(await invokeCommand("create_event", { input }));
   },
-  async updateEvent(input: { id: string; revision: number; title?: string; notes?: string; startAtUtc?: string; timeZone?: string; durationMinutes?: number }) {
+  async updateEvent(input: { id: string; revision: number; title?: string; notes?: string; startAtUtc?: string; timeZone?: string; durationMinutes?: number; reminderChange?: ReminderChange }) {
     return eventSchema.parse(await invokeCommand("update_event", { input }));
   },
   async deleteEvent(id: string, revision: number) {
     await invokeCommand("delete_event", { id, revision });
   },
-  async rescheduleEvent(input: { id: string; revision: number; startAtUtc: string; timeZone: string; durationMinutes: number }) {
+  async rescheduleEvent(input: { id: string; revision: number; startAtUtc: string; timeZone: string; durationMinutes: number; reminderChange?: ReminderChange }) {
     return eventSchema.parse(await invokeCommand("reschedule_event", { input }));
   },
   async createTask(input: { title: string; day: string }) {
