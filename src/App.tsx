@@ -102,12 +102,20 @@ export default function App() {
     if (!agentResponse || agentResponse.kind !== "proposal") return;
     setIsApplying(true);
     try {
-      await api.apply(agentResponse);
+      await api.apply(agentResponse.proposalId);
       setAgentResponse(null);
       setCommand("");
       await refresh();
     } catch (cause) { setError(messageFor(cause)); }
     finally { setIsApplying(false); }
+  }
+
+  async function discardProposal() {
+    if (!agentResponse || agentResponse.kind !== "proposal") return;
+    try {
+      await api.discardProposal(agentResponse.proposalId);
+      setAgentResponse(null);
+    } catch (cause) { setError(messageFor(cause)); }
   }
 
   async function clearContext() {
@@ -172,7 +180,7 @@ export default function App() {
           </section>
 
           <aside className="ai-column">
-            <PlannerCard status={status} events={agenda.events} command={command} onCommand={setCommand} onSubmit={askPlanner} thinking={isThinking} response={agentResponse} onApply={applyProposal} applying={isApplying} onClear={clearContext} onRefreshStatus={refreshStatus} />
+            <PlannerCard status={status} events={agenda.events} command={command} onCommand={setCommand} onSubmit={askPlanner} thinking={isThinking} response={agentResponse} onApply={applyProposal} applying={isApplying} onDiscard={discardProposal} onClear={clearContext} onRefreshStatus={refreshStatus} />
             <section className="quiet-card"><Clock3 size={18} /><div><strong>All times are local</strong><p>{localTimeZone}. Events persist as UTC with their IANA time zone.</p></div></section>
           </aside>
         </div>
@@ -204,8 +212,8 @@ function TaskRow({ task, onToggle, onDelete }: { task: DailyTask; onToggle: () =
   return <div className={`task-row ${task.completed ? "done" : ""}`}><button onClick={onToggle} className="check-box" aria-label={`Mark ${task.title} ${task.completed ? "incomplete" : "complete"}`}>{task.completed && <Check size={13} />}</button><span>{task.title}</span><button className="task-delete" onClick={onDelete} aria-label={`Delete ${task.title}`}><X size={14} /></button></div>
 }
 
-function PlannerCard({ status, events, command, onCommand, onSubmit, thinking, response, onApply, applying, onClear, onRefreshStatus }: {
-  status: OllamaStatus | null; events: ScheduleEvent[]; command: string; onCommand: (value: string) => void; onSubmit: (event: FormEvent) => void; thinking: boolean; response: PlannerResponse | null; onApply: () => void; applying: boolean; onClear: () => void; onRefreshStatus: () => void;
+function PlannerCard({ status, events, command, onCommand, onSubmit, thinking, response, onApply, applying, onDiscard, onClear, onRefreshStatus }: {
+  status: OllamaStatus | null; events: ScheduleEvent[]; command: string; onCommand: (value: string) => void; onSubmit: (event: FormEvent) => void; thinking: boolean; response: PlannerResponse | null; onApply: () => void; applying: boolean; onDiscard: () => void; onClear: () => void; onRefreshStatus: () => void;
 }) {
   const ready = status?.running && status.modelInstalled;
   return <section className="planner-card">
@@ -216,7 +224,7 @@ function PlannerCard({ status, events, command, onCommand, onSubmit, thinking, r
       <div><span><Command size={14} /> The model proposes; you decide.</span><button disabled={!command.trim() || !ready || thinking}>{thinking ? <LoaderCircle className="spin" size={16} /> : <Sparkles size={16} />} Plan changes</button></div>
     </form>
     {response?.kind === "clarification" && <div className="clarification"><span>?</span><p>{response.question}</p></div>}
-    {response?.kind === "proposal" && <div className="proposal"><p className="proposal-kicker">REVIEW BEFORE APPLYING</p><strong>{response.summary}</strong><ul>{response.operations.map((operation, index) => <li key={`${operation.type}-${index}`}><i className={`operation-dot ${operation.type}`} />{operationLabel(operation, events)}</li>)}</ul><div className="proposal-actions"><button className="cancel-proposal" onClick={onClear}>Discard</button><button className="apply-proposal" onClick={onApply} disabled={applying}>{applying ? <LoaderCircle className="spin" size={15} /> : <Check size={15} />} Apply {response.operations.length} change{response.operations.length === 1 ? "" : "s"}</button></div></div>}
+    {response?.kind === "proposal" && <div className="proposal"><p className="proposal-kicker">REVIEW BEFORE APPLYING</p><strong>{response.summary}</strong><ul>{response.operations.map((operation, index) => <li key={`${operation.type}-${index}`}><i className={`operation-dot ${operation.type}`} />{operationLabel(operation, events)}</li>)}</ul><div className="proposal-actions"><button className="cancel-proposal" onClick={onDiscard}>Discard</button><button className="apply-proposal" onClick={onApply} disabled={applying}>{applying ? <LoaderCircle className="spin" size={15} /> : <Check size={15} />} Apply {response.operations.length} change{response.operations.length === 1 ? "" : "s"}</button></div></div>}
     <p className="planner-footnote"><span>◌</span> No API key. No cloud fallback. Context clears when you clear this session.</p>
   </section>;
 }

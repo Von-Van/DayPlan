@@ -5,6 +5,8 @@ use thiserror::Error;
 #[derive(Debug, Error)]
 pub enum AppError {
     #[error("{0}")]
+    Internal(String),
+    #[error("{0}")]
     Validation(String),
     #[error("The requested record no longer exists.")]
     NotFound,
@@ -20,6 +22,12 @@ pub enum AppError {
     UnsupportedDatabaseVersion,
     #[error("The selected backup is not available.")]
     BackupNotFound,
+    #[error("That schedule proposal is unavailable or has already been used.")]
+    ProposalUnavailable,
+    #[error("That schedule proposal expired. Ask DayPlan to prepare it again.")]
+    ProposalExpired,
+    #[error("The planner request was cancelled.")]
+    RequestCancelled,
     #[error(transparent)]
     Database(#[from] rusqlite::Error),
     #[error(transparent)]
@@ -56,6 +64,7 @@ impl CommandError {
 impl From<AppError> for CommandError {
     fn from(error: AppError) -> Self {
         let (code, retryable) = match &error {
+            AppError::Internal(_) => ("internal", true),
             AppError::Validation(_) => ("validation", false),
             AppError::NotFound => ("not_found", false),
             AppError::Conflict => ("conflict", true),
@@ -64,6 +73,9 @@ impl From<AppError> for CommandError {
             AppError::CorruptDatabase => ("corrupt_database", false),
             AppError::UnsupportedDatabaseVersion => ("unsupported_database_version", false),
             AppError::BackupNotFound => ("backup_not_found", false),
+            AppError::ProposalUnavailable => ("proposal_unavailable", false),
+            AppError::ProposalExpired => ("proposal_expired", true),
+            AppError::RequestCancelled => ("request_cancelled", true),
             AppError::Database(_) | AppError::Json(_) | AppError::Io(_) => ("storage", true),
             AppError::Network(_) => ("network", true),
         };

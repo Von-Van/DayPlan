@@ -9,7 +9,7 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "tauri": "tauri",
-    "eval": "cargo run --manifest-path src-tauri/Cargo.toml --example eval_agent -- --fixtures eval/cases.json"
+    "eval": "cargo run --manifest-path src-tauri/Cargo.toml --example eval_agent -- --fixtures eval/cases.json --runs 3 --json-output eval/results/latest.json"
   },
   "dependencies": {
     "@tauri-apps/api": "^2.0.0",

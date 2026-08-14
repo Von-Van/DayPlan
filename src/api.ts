@@ -28,16 +28,16 @@ export const operationSchema = z.discriminatedUnion("type", [
   z.object({ type: z.literal("create_event"), title: z.string().min(1).max(140), notes: z.string(), startAtUtc: z.string().datetime({ offset: true }), timeZone: z.string(), durationMinutes: z.number().int().min(5).max(1440) }).strict(),
   z.object({ type: z.literal("update_event"), eventId: z.string().uuid(), expectedRevision: z.number().int().positive(), title: z.string().nullable(), notes: z.string().nullable(), durationMinutes: z.number().int().min(5).max(1440).nullable() }).strict(),
   z.object({ type: z.literal("delete_event"), eventId: z.string().uuid(), expectedRevision: z.number().int().positive() }).strict(),
-  z.object({ type: z.literal("reschedule_event"), eventId: z.string().uuid(), expectedRevision: z.number().int().positive(), startAtUtc: z.string().datetime({ offset: true }), timeZone: z.string(), durationMinutes: z.number().int().min(5).max(1440).nullable() }).strict()
+  z.object({ type: z.literal("reschedule_event"), eventId: z.string().uuid(), expectedRevision: z.number().int().positive(), title: z.string().min(1).max(140).nullable(), notes: z.string().max(800).nullable(), startAtUtc: z.string().datetime({ offset: true }), timeZone: z.string(), durationMinutes: z.number().int().min(5).max(1440).nullable() }).strict()
 ]);
 
 export const plannerResponseSchema = z.discriminatedUnion("kind", [
-  z.object({ kind: z.literal("proposal"), summary: z.string().min(1).max(280), operations: z.array(operationSchema).min(1).max(12) }).strict(),
+  z.object({ kind: z.literal("proposal"), proposalId: z.string().uuid(), summary: z.string().min(1).max(280), operations: z.array(operationSchema).min(1).max(12), expiresAt: z.string().datetime({ offset: true }) }).strict(),
   z.object({ kind: z.literal("clarification"), question: z.string().min(1).max(280) }).strict()
 ]);
 
 const agendaSchema = z.object({ events: z.array(eventSchema), tasks: z.array(taskSchema) }).strict();
-const statusSchema = z.object({ running: z.boolean(), modelInstalled: z.boolean(), modelName: z.string(), detail: z.string() }).strict();
+const statusSchema = z.object({ running: z.boolean(), modelInstalled: z.boolean(), modelName: z.string(), modelDigest: z.string().nullable(), ollamaVersion: z.string().nullable(), detail: z.string() }).strict();
 const commandErrorSchema = z.object({
   code: z.string(),
   message: z.string(),
@@ -125,8 +125,14 @@ export const api = {
   async propose(command: string, day: string, timeZone: string) {
     return plannerResponseSchema.parse(await invokeCommand("propose_schedule_changes", { command, day, timeZone }));
   },
-  async apply(proposal: PlannerResponse) {
-    return z.array(eventSchema).parse(await invokeCommand("apply_schedule_changes", { proposal }));
+  async apply(proposalId: string) {
+    return z.array(eventSchema).parse(await invokeCommand("apply_schedule_changes", { proposalId }));
+  },
+  async discardProposal(proposalId: string) {
+    await invokeCommand("discard_schedule_proposal", { proposalId });
+  },
+  async cancelPlannerRequest() {
+    await invokeCommand("cancel_planner_request");
   },
   async clearContext() {
     await invokeCommand("clear_planner_context");

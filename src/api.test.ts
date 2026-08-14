@@ -4,7 +4,7 @@ import { plannerResponseSchema } from "./api";
 describe("planner response boundary", () => {
   it("rejects fields outside the approved operation schema", () => {
     expect(() => plannerResponseSchema.parse({
-      kind: "proposal", summary: "Move gym", operations: [{
+      kind: "proposal", proposalId: "30bb9c6a-4020-45a6-806b-5eb71c7ae76f", summary: "Move gym", expiresAt: "2026-08-12T20:00:00.000Z", operations: [{
         type: "delete_event", eventId: "30bb9c6a-4020-45a6-806b-5eb71c7ae76f", expectedRevision: 1, sql: "DROP TABLE schedule_events"
       }]
     })).toThrow();
@@ -14,4 +14,3 @@ describe("planner response boundary", () => {
     expect(plannerResponseSchema.parse({ kind: "clarification", question: "Which Gym event should I move?" }).kind).toBe("clarification");
   });
 });
-

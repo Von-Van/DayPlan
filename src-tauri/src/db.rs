@@ -1,9 +1,9 @@
 use crate::error::{AppError, AppResult};
 use crate::model::{
     BackupInfo, CreateEventInput, CreateTaskInput, DailyTask, ExportBundle, ImportPreview,
-    LocalDateTimeInput, LocalDateTimeResolution, LocalTimeOption, MutationOperation,
-    PlannerResponse, RescheduleEventInput, ScheduleEvent, UpdateEventInput, UpdateTaskInput,
-    MAX_NOTES_LENGTH, MAX_OPERATIONS, MAX_TITLE_LENGTH,
+    LocalDateTimeInput, LocalDateTimeResolution, LocalTimeOption, ModelResponse, MutationOperation,
+    RescheduleEventInput, ScheduleEvent, UpdateEventInput, UpdateTaskInput, MAX_NOTES_LENGTH,
+    MAX_OPERATIONS, MAX_TITLE_LENGTH,
 };
 use chrono::{DateTime, LocalResult, NaiveDate, NaiveDateTime, NaiveTime, Offset, TimeZone, Utc};
 use chrono_tz::Tz;
@@ -393,8 +393,8 @@ impl PlannerDatabase {
         collect(rows)
     }
 
-    pub fn apply_proposal(&mut self, proposal: &PlannerResponse) -> AppResult<Vec<ScheduleEvent>> {
-        let PlannerResponse::Proposal { operations, .. } = proposal else {
+    pub fn apply_proposal(&mut self, proposal: &ModelResponse) -> AppResult<Vec<ScheduleEvent>> {
+        let ModelResponse::Proposal { operations, .. } = proposal else {
             return Err(AppError::Validation(
                 "Clarifications cannot be applied as schedule changes.".into(),
             ));
@@ -466,6 +466,8 @@ impl PlannerDatabase {
                 MutationOperation::RescheduleEvent {
                     event_id,
                     expected_revision,
+                    title,
+                    notes,
                     start_at_utc,
                     time_zone,
                     duration_minutes,
@@ -475,12 +477,16 @@ impl PlannerDatabase {
                         return Err(AppError::Conflict);
                     }
                     let (start, zone) = validate_time(start_at_utc, time_zone)?;
+                    let next_title = title.as_deref().unwrap_or(&current.title);
+                    let next_notes = notes.as_deref().unwrap_or(&current.notes);
+                    validate_title(next_title)?;
+                    validate_notes(next_notes)?;
                     let next_duration = duration_minutes.unwrap_or(current.duration_minutes);
                     validate_duration(next_duration)?;
                     let count = transaction.execute(
-                        "UPDATE schedule_events SET start_at_utc=?1, time_zone=?2, duration_minutes=?3, revision=revision+1, updated_at=?4
-                         WHERE id=?5 AND revision=?6",
-                        params![start, zone, next_duration, now(), event_id, expected_revision],
+                        "UPDATE schedule_events SET title=?1, notes=?2, start_at_utc=?3, time_zone=?4, duration_minutes=?5, revision=revision+1, updated_at=?6
+                         WHERE id=?7 AND revision=?8",
+                        params![next_title.trim(), next_notes.trim(), start, zone, next_duration, now(), event_id, expected_revision],
                     )?;
                     if count != 1 {
                         return Err(AppError::Conflict);
@@ -709,12 +715,20 @@ fn validate_operations(operations: &[MutationOperation]) -> AppResult<()> {
             MutationOperation::RescheduleEvent {
                 event_id,
                 expected_revision,
+                title,
+                notes,
                 start_at_utc,
                 time_zone,
                 duration_minutes,
             } => {
                 validate_id(event_id)?;
                 validate_revision(*expected_revision)?;
+                if let Some(title) = title {
+                    validate_title(title)?;
+                }
+                if let Some(notes) = notes {
+                    validate_notes(notes)?;
+                }
                 validate_time(start_at_utc, time_zone)?;
                 if let Some(duration) = duration_minutes {
                     validate_duration(*duration)?;
@@ -725,9 +739,9 @@ fn validate_operations(operations: &[MutationOperation]) -> AppResult<()> {
     Ok(())
 }
 
-pub fn validate_model_response(response: &PlannerResponse) -> AppResult<()> {
+pub fn validate_model_response(response: &ModelResponse) -> AppResult<()> {
     match response {
-        PlannerResponse::Proposal {
+        ModelResponse::Proposal {
             summary,
             operations,
         } => {
@@ -738,14 +752,14 @@ pub fn validate_model_response(response: &PlannerResponse) -> AppResult<()> {
             }
             validate_operations(operations)
         }
-        PlannerResponse::Clarification { question }
+        ModelResponse::Clarification { question }
             if question.trim().is_empty() || question.chars().count() > 280 =>
         {
             Err(AppError::Validation(
                 "A clarification needs one short question.".into(),
             ))
         }
-        PlannerResponse::Clarification { .. } => Ok(()),
+        ModelResponse::Clarification { .. } => Ok(()),
     }
 }
 
@@ -1112,7 +1126,7 @@ mod tests {
         let existing = db
             .create_event(event_input("Gym", "2026-08-12T22:00:00Z"))
             .unwrap();
-        let proposal = PlannerResponse::proposal(
+        let proposal = ModelResponse::proposal(
             "Two changes",
             vec![
                 MutationOperation::CreateEvent {
@@ -1125,6 +1139,8 @@ mod tests {
                 MutationOperation::RescheduleEvent {
                     event_id: existing.id,
                     expected_revision: 99,
+                    title: None,
+                    notes: None,
                     start_at_utc: "2026-08-13T22:00:00Z".into(),
                     time_zone: "America/New_York".into(),
                     duration_minutes: None,

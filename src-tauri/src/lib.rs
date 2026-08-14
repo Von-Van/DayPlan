@@ -3,7 +3,7 @@ pub mod db;
 pub mod error;
 pub mod model;
 
-use agent::{ollama_status, OllamaStatus, PlannerAgent};
+use agent::{OllamaStatus, PlannerAgent};
 use db::{backups_for_path, restore_backup, PlannerDatabase, CURRENT_SCHEMA_VERSION};
 use error::{AppError, CommandError};
 use model::{
@@ -11,7 +11,6 @@ use model::{
     LocalDateTimeInput, LocalDateTimeResolution, PlannerResponse, RescheduleEventInput,
     ScheduleEvent, UpdateEventInput, UpdateTaskInput,
 };
-use reqwest::blocking::Client;
 use serde::Serialize;
 use std::fs;
 use std::path::PathBuf;
@@ -20,7 +19,7 @@ use tauri::{Manager, State};
 
 struct AppState {
     database: Mutex<DatabaseRuntime>,
-    agent: Mutex<PlannerAgent>,
+    agent: PlannerAgent,
 }
 
 struct DatabaseRuntime {
@@ -214,45 +213,65 @@ fn restore_database_backup(
 }
 
 #[tauri::command]
-fn current_ollama_status() -> OllamaStatus {
-    ollama_status(&Client::new())
+async fn current_ollama_status(state: State<'_, AppState>) -> Result<OllamaStatus, CommandError> {
+    Ok(state.agent.status().await)
 }
 
 #[tauri::command]
-fn propose_schedule_changes(
+async fn propose_schedule_changes(
     state: State<'_, AppState>,
     command: String,
     day: String,
     time_zone: String,
 ) -> Result<PlannerResponse, CommandError> {
+    let referenced_ids = state.agent.referenced_event_ids();
     let candidates = with_database(&state, |database| {
-        database.candidate_events(&command, &day, &time_zone, &[], 60)
+        database.candidate_events(&command, &day, &time_zone, &referenced_ids, 60)
     })?;
-    let mut agent = state
+    state
         .agent
-        .lock()
-        .map_err(|_| CommandError::internal("The local planner session is unavailable."))?;
-    agent
         .propose(&command, &day, &time_zone, &candidates)
+        .await
         .map_err(CommandError::from)
 }
 
 #[tauri::command]
 fn apply_schedule_changes(
     state: State<'_, AppState>,
-    proposal: PlannerResponse,
+    proposal_id: String,
 ) -> Result<Vec<ScheduleEvent>, CommandError> {
-    with_database(&state, |database| database.apply_proposal(&proposal))
+    let proposal = state
+        .agent
+        .claim_pending(&proposal_id)
+        .map_err(CommandError::from)?;
+    let result = with_database(&state, |database| database.apply_proposal(&proposal));
+    let applied = result.is_ok();
+    state
+        .agent
+        .finish_pending(&proposal_id, applied)
+        .map_err(CommandError::from)?;
+    result
 }
 
 #[tauri::command]
 fn clear_planner_context(state: State<'_, AppState>) -> Result<(), CommandError> {
+    state.agent.clear_context().map_err(CommandError::from)
+}
+
+#[tauri::command]
+fn discard_schedule_proposal(
+    state: State<'_, AppState>,
+    proposal_id: String,
+) -> Result<(), CommandError> {
     state
         .agent
-        .lock()
-        .map_err(|_| CommandError::internal("The local planner session is unavailable."))?
-        .clear_context();
-    Ok(())
+        .discard_pending(&proposal_id)
+        .map_err(CommandError::from)
+}
+
+#[tauri::command]
+fn cancel_planner_request(state: State<'_, AppState>) {
+    state.agent.cancel_current();
 }
 
 pub fn run() {
@@ -266,7 +285,7 @@ pub fn run() {
             fs::create_dir_all(&directory).map_err(|error| error.to_string())?;
             app.manage(AppState {
                 database: Mutex::new(DatabaseRuntime::new(directory.join("dayplan.sqlite3"))),
-                agent: Mutex::new(PlannerAgent::default()),
+                agent: PlannerAgent::default(),
             });
             Ok(())
         })
@@ -288,6 +307,8 @@ pub fn run() {
             current_ollama_status,
             propose_schedule_changes,
             apply_schedule_changes,
+            discard_schedule_proposal,
+            cancel_planner_request,
             clear_planner_context,
         ])
         .run(tauri::generate_context!())
