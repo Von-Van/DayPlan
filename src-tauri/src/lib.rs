@@ -12,18 +12,30 @@ use model::{
     ScheduleEvent, UpdateEventInput, UpdateTaskInput,
 };
 use serde::Serialize;
-use std::fs;
+use std::fs::{self, File};
+use std::io::{Read, Write};
 use std::path::PathBuf;
 use std::sync::Mutex;
 use std::time::Duration;
 use tauri::menu::{Menu, MenuItem};
 use tauri::tray::TrayIconBuilder;
 use tauri::{AppHandle, Manager, State};
+use tauri_plugin_dialog::DialogExt;
 use tauri_plugin_notification::NotificationExt;
+use uuid::Uuid;
+use zip::write::SimpleFileOptions;
+
+const MAX_IMPORT_BYTES: u64 = 50 * 1024 * 1024;
 
 struct AppState {
     database: Mutex<DatabaseRuntime>,
     agent: PlannerAgent,
+    pending_import: Mutex<Option<PendingImport>>,
+}
+
+struct PendingImport {
+    token: String,
+    bundle: ExportBundle,
 }
 
 struct DatabaseRuntime {
@@ -54,6 +66,38 @@ impl DatabaseRuntime {
 struct Agenda {
     events: Vec<ScheduleEvent>,
     tasks: Vec<DailyTask>,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ImportSelection {
+    token: String,
+    preview: ImportPreview,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct FileActionResult {
+    completed: bool,
+    file_name: Option<String>,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct DiagnosticManifest {
+    generated_at: String,
+    app_version: String,
+    operating_system: String,
+    architecture: String,
+    database_ready: bool,
+    schema_version: u32,
+    backup_count: usize,
+    ollama_running: bool,
+    model_installed: bool,
+    model_name: String,
+    model_digest: Option<String>,
+    ollama_version: Option<String>,
+    privacy_note: &'static str,
 }
 
 fn with_database<T>(
@@ -169,21 +213,128 @@ fn resolve_local_datetime(
 }
 
 #[tauri::command]
-fn export_planner_data(state: State<'_, AppState>) -> Result<ExportBundle, CommandError> {
-    with_database(&state, |database| database.export_bundle())
-}
-
-#[tauri::command]
-fn preview_planner_import(bundle: ExportBundle) -> Result<ImportPreview, CommandError> {
-    PlannerDatabase::preview_import(&bundle).map_err(CommandError::from)
-}
-
-#[tauri::command]
-fn import_planner_data(
+async fn export_planner_file(
+    app: AppHandle,
     state: State<'_, AppState>,
-    bundle: ExportBundle,
+) -> Result<FileActionResult, CommandError> {
+    let bundle = with_database(&state, |database| database.export_bundle())?;
+    let app_for_dialog = app.clone();
+    let path = tauri::async_runtime::spawn_blocking(move || {
+        app_for_dialog
+            .dialog()
+            .file()
+            .set_title("Export DayPlan data")
+            .set_file_name("dayplan-export.json")
+            .add_filter("DayPlan JSON", &["json"])
+            .blocking_save_file()
+            .and_then(|path| path.as_path().map(PathBuf::from))
+    })
+    .await
+    .map_err(|_| CommandError::internal("The export dialog could not be opened."))?;
+    let Some(path) = path else {
+        return Ok(FileActionResult {
+            completed: false,
+            file_name: None,
+        });
+    };
+    let bytes = serde_json::to_vec_pretty(&bundle)
+        .map_err(AppError::from)
+        .map_err(CommandError::from)?;
+    fs::write(&path, bytes)
+        .map_err(AppError::from)
+        .map_err(CommandError::from)?;
+    Ok(FileActionResult {
+        completed: true,
+        file_name: path.file_name().map(|name| name.to_string_lossy().into()),
+    })
+}
+
+#[tauri::command]
+async fn select_planner_import(
+    app: AppHandle,
+    state: State<'_, AppState>,
+) -> Result<Option<ImportSelection>, CommandError> {
+    let app_for_dialog = app.clone();
+    let path = tauri::async_runtime::spawn_blocking(move || {
+        app_for_dialog
+            .dialog()
+            .file()
+            .set_title("Choose a DayPlan export")
+            .add_filter("DayPlan JSON", &["json"])
+            .blocking_pick_file()
+            .and_then(|path| path.as_path().map(PathBuf::from))
+    })
+    .await
+    .map_err(|_| CommandError::internal("The import dialog could not be opened."))?;
+    let Some(path) = path else {
+        return Ok(None);
+    };
+    if path
+        .metadata()
+        .map_err(AppError::from)
+        .map_err(CommandError::from)?
+        .len()
+        > MAX_IMPORT_BYTES
+    {
+        return Err(CommandError::from(AppError::Validation(
+            "That import is larger than the 50 MB limit.".into(),
+        )));
+    }
+    let contents = fs::read_to_string(path)
+        .map_err(AppError::from)
+        .map_err(CommandError::from)?;
+    let bundle: ExportBundle = serde_json::from_str(&contents)
+        .map_err(AppError::from)
+        .map_err(CommandError::from)?;
+    let preview = PlannerDatabase::preview_import(&bundle).map_err(CommandError::from)?;
+    let token = Uuid::new_v4().to_string();
+    state
+        .pending_import
+        .lock()
+        .map_err(|_| CommandError::internal("The import preview is unavailable."))?
+        .replace(PendingImport {
+            token: token.clone(),
+            bundle,
+        });
+    Ok(Some(ImportSelection { token, preview }))
+}
+
+#[tauri::command]
+fn apply_selected_import(
+    state: State<'_, AppState>,
+    token: String,
 ) -> Result<ImportPreview, CommandError> {
+    let bundle = {
+        let mut pending = state
+            .pending_import
+            .lock()
+            .map_err(|_| CommandError::internal("The import preview is unavailable."))?;
+        let selected = pending.as_ref().ok_or_else(|| {
+            CommandError::from(AppError::Validation(
+                "Choose and preview an import file before replacing data.".into(),
+            ))
+        })?;
+        if selected.token != token {
+            return Err(CommandError::from(AppError::Validation(
+                "That import preview is no longer current.".into(),
+            )));
+        }
+        pending
+            .take()
+            .expect("pending import presence checked")
+            .bundle
+    };
     with_database(&state, |database| database.import_bundle(&bundle))
+}
+
+#[tauri::command]
+fn discard_selected_import(state: State<'_, AppState>) -> Result<(), CommandError> {
+    state
+        .pending_import
+        .lock()
+        .map_err(|_| CommandError::internal("The import preview is unavailable."))?
+        .take();
+    Ok(())
 }
 
 #[tauri::command]
@@ -219,6 +370,136 @@ fn restore_database_backup(
 #[tauri::command]
 async fn current_ollama_status(state: State<'_, AppState>) -> Result<OllamaStatus, CommandError> {
     Ok(state.agent.status().await)
+}
+
+#[tauri::command]
+async fn export_diagnostic_bundle(
+    app: AppHandle,
+    state: State<'_, AppState>,
+) -> Result<FileActionResult, CommandError> {
+    let (database_ready, schema_version, backup_count) = {
+        let runtime = state
+            .database
+            .lock()
+            .map_err(|_| CommandError::internal("Database diagnostics are unavailable."))?;
+        (
+            runtime.database.is_some(),
+            runtime
+                .database
+                .as_ref()
+                .and_then(|database| database.schema_version().ok())
+                .unwrap_or(CURRENT_SCHEMA_VERSION),
+            backups_for_path(&runtime.path)
+                .map(|items| items.len())
+                .unwrap_or(0),
+        )
+    };
+    let model = state.agent.status().await;
+    let manifest = DiagnosticManifest {
+        generated_at: chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true),
+        app_version: app.package_info().version.to_string(),
+        operating_system: std::env::consts::OS.into(),
+        architecture: std::env::consts::ARCH.into(),
+        database_ready,
+        schema_version,
+        backup_count,
+        ollama_running: model.running,
+        model_installed: model.model_installed,
+        model_name: model.model_name,
+        model_digest: model.model_digest,
+        ollama_version: model.ollama_version,
+        privacy_note: "Commands, event/task titles, notes, proposal contents, and database paths are excluded.",
+    };
+    let app_for_dialog = app.clone();
+    let path = tauri::async_runtime::spawn_blocking(move || {
+        app_for_dialog
+            .dialog()
+            .file()
+            .set_title("Export DayPlan diagnostics")
+            .set_file_name("dayplan-diagnostics.zip")
+            .add_filter("ZIP archive", &["zip"])
+            .blocking_save_file()
+            .and_then(|path| path.as_path().map(PathBuf::from))
+    })
+    .await
+    .map_err(|_| CommandError::internal("The diagnostic export dialog could not be opened."))?;
+    let Some(path) = path else {
+        return Ok(FileActionResult {
+            completed: false,
+            file_name: None,
+        });
+    };
+    let file_name = path.file_name().map(|name| name.to_string_lossy().into());
+    let log_directory = app.path().app_log_dir().ok();
+    tauri::async_runtime::spawn_blocking(move || {
+        write_diagnostic_zip(&path, &manifest, log_directory)
+    })
+    .await
+    .map_err(|_| CommandError::internal("The diagnostic bundle could not be created."))??;
+    Ok(FileActionResult {
+        completed: true,
+        file_name,
+    })
+}
+
+fn write_diagnostic_zip(
+    destination: &PathBuf,
+    manifest: &DiagnosticManifest,
+    log_directory: Option<PathBuf>,
+) -> Result<(), CommandError> {
+    let file = File::create(destination)
+        .map_err(AppError::from)
+        .map_err(CommandError::from)?;
+    let mut archive = zip::ZipWriter::new(file);
+    let options = SimpleFileOptions::default().compression_method(zip::CompressionMethod::Deflated);
+    archive
+        .start_file("diagnostics.json", options)
+        .map_err(|_| CommandError::internal("The diagnostic archive could not be written."))?;
+    archive
+        .write_all(
+            &serde_json::to_vec_pretty(manifest)
+                .map_err(AppError::from)
+                .map_err(CommandError::from)?,
+        )
+        .map_err(AppError::from)
+        .map_err(CommandError::from)?;
+    if let Some(directory) = log_directory {
+        let mut logs = fs::read_dir(directory)
+            .ok()
+            .into_iter()
+            .flatten()
+            .filter_map(Result::ok)
+            .filter(|entry| {
+                entry.file_name().to_string_lossy().starts_with("dayplan")
+                    && entry
+                        .path()
+                        .extension()
+                        .is_some_and(|extension| extension == "log")
+            })
+            .collect::<Vec<_>>();
+        logs.sort_by_key(|entry| entry.file_name());
+        for (index, entry) in logs.into_iter().rev().take(5).enumerate() {
+            let mut bytes = Vec::new();
+            if File::open(entry.path())
+                .and_then(|file| file.take(512 * 1024).read_to_end(&mut bytes))
+                .is_ok()
+            {
+                archive
+                    .start_file(format!("logs/dayplan-{index}.log"), options)
+                    .map_err(|_| {
+                        CommandError::internal("The diagnostic archive could not be written.")
+                    })?;
+                archive
+                    .write_all(&bytes)
+                    .map_err(AppError::from)
+                    .map_err(CommandError::from)?;
+            }
+        }
+    }
+    archive
+        .finish()
+        .map_err(|_| CommandError::internal("The diagnostic archive could not be finalized."))?;
+    Ok(())
 }
 
 #[tauri::command]
@@ -365,8 +646,28 @@ fn install_tray(app: &tauri::App) -> tauri::Result<()> {
 
 pub fn run() {
     tauri::Builder::default()
+        .plugin(
+            tauri_plugin_log::Builder::new()
+                .level(tauri_plugin_log::log::LevelFilter::Info)
+                .max_file_size(512 * 1024)
+                .rotation_strategy(tauri_plugin_log::RotationStrategy::KeepSome(5))
+                .target(
+                    tauri_plugin_log::Target::new(tauri_plugin_log::TargetKind::LogDir {
+                        file_name: Some("dayplan".into()),
+                    })
+                    .filter(|metadata| metadata.target().starts_with("dayplan_desktop")),
+                )
+                .build(),
+        )
+        .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_notification::init())
+        .plugin(tauri_plugin_process::init())
+        .plugin(
+            tauri_plugin_updater::Builder::new()
+                .pubkey(option_env!("DAYPLAN_UPDATER_PUBKEY").unwrap_or(""))
+                .build(),
+        )
         .on_window_event(|window, event| {
             if let tauri::WindowEvent::CloseRequested { api, .. } = event {
                 api.prevent_close();
@@ -382,7 +683,9 @@ pub fn run() {
             app.manage(AppState {
                 database: Mutex::new(DatabaseRuntime::new(directory.join("dayplan.sqlite3"))),
                 agent: PlannerAgent::default(),
+                pending_import: Mutex::new(None),
             });
+            tauri_plugin_log::log::info!("app_started");
             install_tray(app)?;
             let handle = app.handle().clone();
             tauri::async_runtime::spawn(reminder_worker(handle));
@@ -399,11 +702,13 @@ pub fn run() {
             update_task,
             delete_task,
             resolve_local_datetime,
-            export_planner_data,
-            preview_planner_import,
-            import_planner_data,
+            export_planner_file,
+            select_planner_import,
+            apply_selected_import,
+            discard_selected_import,
             restore_database_backup,
             current_ollama_status,
+            export_diagnostic_bundle,
             propose_schedule_changes,
             apply_schedule_changes,
             discard_schedule_proposal,

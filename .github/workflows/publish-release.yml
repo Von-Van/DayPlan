@@ -1,0 +1,34 @@
+name: Publish Approved Beta
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing draft release tag (for example v0.1.0)
+        required: true
+      native_smoke_tests_passed:
+        description: Confirm macOS and Windows native smoke checks passed
+        required: true
+        type: boolean
+
+permissions:
+  contents: write
+
+jobs:
+  publish:
+    if: inputs.native_smoke_tests_passed
+    runs-on: ubuntu-24.04
+    environment: public-beta-publish
+    steps:
+      - name: Verify and publish draft
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ inputs.tag }}
+        shell: bash
+        run: |
+          test "$(gh api "repos/$GITHUB_REPOSITORY/releases/tags/$RELEASE_TAG" --jq .draft)" = true
+          assets=$(gh api "repos/$GITHUB_REPOSITORY/releases/tags/$RELEASE_TAG" --jq '.assets[].name')
+          for pattern in '^latest.json$' '^SHA256SUMS.txt$' '^dayplan-sbom.cdx.json$' '\.dmg$' 'setup\.exe$' '\.app\.tar\.gz\.sig$' 'setup\.exe\.sig$'; do
+            grep -Eq "$pattern" <<< "$assets" || { echo "Missing release asset matching: $pattern"; exit 1; }
+          done
+          gh release edit "$RELEASE_TAG" --draft=false

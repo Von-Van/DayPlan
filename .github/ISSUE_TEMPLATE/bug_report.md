@@ -7,6 +7,7 @@ labels: bug
 ## Summary
 
 ## Steps to Reproduce
+
 1.
 2.
 3.
@@ -16,6 +17,8 @@ labels: bug
 ## Actual
 
 ## Environment
-- iOS version:
-- Device or simulator:
-- Xcode version:
+
+- DayPlan version:
+- macOS or Windows version:
+- CPU architecture:
+- Ollama/model version (if relevant):
