@@ -1,35 +1,160 @@
 # DayPlan — Local AI Desktop Planner
 
-DayPlan is a local-first day planner for macOS and Windows. It pairs a timed agenda, daily tasks, per-event reminders, recovery tooling, and a natural-language planner that turns messy requests into reviewed, typed schedule proposals.
+DayPlan is a local-first day planner for macOS and Windows. It combines a timed agenda, daily tasks, per-event reminders, recovery tools, and a natural-language planner that turns messy requests into reviewed schedule changes.
 
 > “Move gym to 6pm tomorrow, add dentist Thursday at 2pm, push everything after lunch back 30 minutes.”
 
-The portfolio story is the permission boundary, not the chat box: the model never receives a database handle and cannot write planner data. It can emit exactly one strict tool call containing a proposal or a clarification. DayPlan validates that response twice, shows a human-readable preview, and applies only a server-owned, single-use proposal ID after explicit confirmation.
+The important engineering idea is the permission boundary, not the chat box: the model never receives a database handle and cannot write planner data. It may only return one schema-constrained proposal or one clarification question. DayPlan validates the response, presents a readable preview, and mutates SQLite only after explicit user confirmation.
 
-The earlier SwiftUI / SwiftData / WidgetKit app remains available on the [`ios-swiftui`](https://github.com/Von-Van/DayPlan/tree/ios-swiftui) branch. This desktop edition starts with a fresh local database and intentionally does not sync or migrate iOS data.
+## What the app includes
 
-## Architecture
+| Area | What it does | Where it runs |
+| --- | --- | --- |
+| Day agenda | Displays timed events, overlapping events, and daily tasks | React renderer + Rust repository |
+| Manual planning | Creates, edits, reschedules, and deletes events with revision checks | Typed Tauri commands + Rust transactions |
+| AI planner | Converts natural language into a preview of permitted schedule operations | Managed local Ollama + Rust `PlannerAgent` |
+| Reminders | Stores one optional reminder per event and retries interrupted delivery | SQLite outbox + native notification plugin |
+| Data safety | Migrates, checks, backs up, exports, imports, and restores local data | Rust + SQLite |
+| Distribution | Produces signed macOS and Windows installers and user-approved updates | GitHub Actions + Tauri updater |
+
+The desktop edition is single-device and requires no account, API key, hosted backend, or cloud AI. The earlier SwiftUI / SwiftData / WidgetKit app remains available on the [`ios-swiftui`](https://github.com/Von-Van/DayPlan/tree/ios-swiftui) branch; its data is intentionally separate.
+
+## Layered architecture
+
+The renderer is intentionally the least-trusted application layer. It can request actions and display previews, but persistence, AI lifecycle, proposal ownership, validation, and native integrations remain in Rust.
 
 ```mermaid
-flowchart LR
-  U["React + TypeScript UI"] -->|"Typed Tauri commands"| R["Rust services"]
-  R --> D["SQLite repository"]
-  U -->|"Natural-language command"| A["Rust PlannerAgent"]
-  A -->|"Ranked event context; no notes"| M["Managed Ollama runtime"]
-  M -->|"Private dynamic loopback port"| O["qwen3:8b in DayPlan storage"]
-  O -->|"Exactly one tool call"| V["Strict schema + Serde validation"]
-  V -->|"Proposal ID + preview"| U
-  U -->|"Confirm proposal ID"| P["Pending proposal registry"]
-  P -->|"Revision recheck"| T["One SQLite transaction"]
-  T --> D
-  D --> X["Reminder outbox"]
-  X --> N["Official Tauri notification plugin"]
+flowchart TB
+  subgraph presentation["1. Presentation layer — React + TypeScript"]
+    Agenda["Agenda and tasks"]
+    PlannerUI["Natural-language input and proposal preview"]
+    Settings["Onboarding, settings, import/export, recovery"]
+    Boundary["Zod response validation"]
+  end
+
+  subgraph ipc["2. Application boundary — typed Tauri IPC"]
+    Commands["Allowlisted commands and typed errors"]
+  end
+
+  subgraph domain["3. Rust domain and service layer"]
+    Models["Domain models and mutation schema"]
+    Agent["PlannerAgent and pending proposal registry"]
+    Runtime["OllamaRuntimeManager"]
+    Reminder["Reminder reconciliation worker"]
+    Files["Migration, backup, import/export, diagnostics"]
+  end
+
+  subgraph persistence["4. Persistence layer"]
+    Repo["PlannerDatabase repository"]
+    SQLite["Versioned local SQLite database"]
+    ModelStore["Isolated qwen3:8b model files"]
+  end
+
+  subgraph native["5. Local platform integrations"]
+    Ollama["Bundled Ollama server on a private loopback port"]
+    Notifications["macOS / Windows notifications"]
+    Dialogs["Native file dialogs and updater"]
+  end
+
+  Agenda --> Commands
+  PlannerUI --> Boundary --> Commands
+  Settings --> Commands
+  Commands --> Models
+  Commands --> Agent
+  Commands --> Files
+  Agent --> Runtime --> Ollama
+  Ollama --> ModelStore
+  Models --> Repo --> SQLite
+  Agent -->|"Validated proposal ID only"| Repo
+  Reminder --> Repo
+  Reminder --> Notifications
+  Files --> Repo
+  Files --> Dialogs
 ```
 
-- **Tauri 2 + React + TypeScript** provides one desktop codebase for macOS 13+ universal binaries and Windows 10 22H2/11 x64.
-- **Rust services** own validation, local-time resolution, AI context selection, proposal state, file import/export, and every database mutation.
-- **SQLite** stores `ScheduleEvent` and `DailyTask` records. Transactional migrations use `PRAGMA user_version`; startup runs `quick_check`; migration/import/restore operations create checkpointed backups, with the latest five retained.
-- **Managed Ollama** is bundled with DayPlan and runs `qwen3:8b` on a private, dynamically selected loopback port. DayPlan never connects to a system Ollama installation and has no account, API key, hosted backend, cloud fallback, or per-command API fee.
+### Layer responsibilities
+
+| Layer | Owns | Explicitly does not own |
+| --- | --- | --- |
+| React renderer | Interaction state, forms, previews, accessibility, strict public-response parsing | SQL, model processes, proposal operations, secrets, filesystem paths |
+| Tauri IPC | A narrow command surface, argument serialization, typed error responses | Business decisions or direct database queries |
+| Rust services | Validation, time-zone handling, AI context, proposal/session state, native workflows | Presentation state |
+| Repository | Transactions, revisions, migrations, integrity checks, backups, reminder outbox | Natural-language interpretation |
+| Ollama runtime | Local inference for one pinned model | Database access, cloud fallback, application updates |
+
+### Repository map
+
+| Path | Responsibility |
+| --- | --- |
+| [`src/`](src/) | React views, interaction state, accessibility, styling, and strict frontend schemas |
+| [`src/api.ts`](src/api.ts) | Typed renderer-facing command client and Zod response boundary |
+| [`src-tauri/src/lib.rs`](src-tauri/src/lib.rs) | Tauri application composition, IPC commands, native plugins, tray, and reminder worker |
+| [`src-tauri/src/model.rs`](src-tauri/src/model.rs) | Domain records, AI mutation union, proposal types, and shared limits |
+| [`src-tauri/src/db.rs`](src-tauri/src/db.rs) | SQLite repository, transactions, migrations, backups, imports, and reminder outbox |
+| [`src-tauri/src/agent.rs`](src-tauri/src/agent.rs) | Prompt/context construction, tool schema, ambiguity rules, validation, and session proposals |
+| [`src-tauri/src/runtime.rs`](src-tauri/src/runtime.rs) | Bundled Ollama process, private endpoint, model download, diagnostics, and lifecycle |
+| [`eval/`](eval/) | Hand-labeled commands and machine-readable evaluation results |
+
+## Core data schema
+
+```mermaid
+erDiagram
+  SCHEDULE_EVENT {
+    uuid id PK
+    string title
+    string notes
+    datetime start_at_utc
+    string time_zone
+    integer duration_minutes
+    integer reminder_minutes_before "nullable"
+    string reminder_status
+    uuid notification_id "nullable, unique"
+    string reminder_last_error "nullable"
+    integer revision
+    datetime created_at
+    datetime updated_at
+  }
+
+  DAILY_TASK {
+    uuid id PK
+    string title
+    date day
+    boolean completed
+    datetime completed_at "nullable"
+    integer sort_order
+    datetime created_at
+    datetime updated_at
+  }
+
+```
+
+`ScheduleEvent` is revisioned so manual edits and AI proposals can detect stale data. Times are persisted in UTC alongside their IANA time zone. Reminder offset, status, internal notification ID, and retry error are columns on the event itself; together they form the transactional reminder outbox that startup reconciliation processes. `DailyTask` is intentionally separate from timed events, and task reminders are outside the current scope.
+
+AI proposals are not database records. They live only in memory, expire after ten minutes, and contain up to twelve operations from the closed `create_event`, `update_event`, `delete_event`, and `reschedule_event` union.
+
+## How an AI command moves through the system
+
+```mermaid
+sequenceDiagram
+  actor User
+  participant UI as React renderer
+  participant Agent as Rust PlannerAgent
+  participant DB as SQLite repository
+  participant LLM as Managed qwen3:8b
+
+  User->>UI: Enter a messy schedule request
+  UI->>Agent: propose_schedule_changes(command, day, timeZone)
+  Agent->>DB: Rank relevant event candidates
+  DB-->>Agent: At most 60 events, without notes
+  Agent->>LLM: Date/time context, candidates, four session turns, one tool schema
+  LLM-->>Agent: Exactly one proposal or clarification
+  Agent->>Agent: Deserialize and validate fields, references, limits, and ambiguity
+  Agent-->>UI: Clarification or server-owned proposalId + preview
+  User->>UI: Apply proposal
+  UI->>Agent: apply_schedule_changes(proposalId)
+  Agent->>DB: Recheck expiry, IDs, and revisions; apply one transaction
+  DB-->>UI: Updated events or typed failure with no partial mutation
+```
 
 ## AI permission boundary
 
