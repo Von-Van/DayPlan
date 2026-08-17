@@ -8,14 +8,14 @@ The important engineering idea is the permission boundary, not the chat box: the
 
 ## What the app includes
 
-| Area | What it does | Where it runs |
-| --- | --- | --- |
-| Day agenda | Displays timed events, overlapping events, and daily tasks | React renderer + Rust repository |
-| Manual planning | Creates, edits, reschedules, and deletes events with revision checks | Typed Tauri commands + Rust transactions |
-| AI planner | Converts natural language into a preview of permitted schedule operations | Managed local Ollama + Rust `PlannerAgent` |
-| Reminders | Stores one optional reminder per event and retries interrupted delivery | SQLite outbox + native notification plugin |
-| Data safety | Migrates, checks, backs up, exports, imports, and restores local data | Rust + SQLite |
-| Distribution | Produces signed macOS and Windows installers and user-approved updates | GitHub Actions + Tauri updater |
+| Area            | What it does                                                              | Where it runs                              |
+| --------------- | ------------------------------------------------------------------------- | ------------------------------------------ |
+| Day agenda      | Displays timed events, overlapping events, and daily tasks                | React renderer + Rust repository           |
+| Manual planning | Creates, edits, reschedules, and deletes events with revision checks      | Typed Tauri commands + Rust transactions   |
+| AI planner      | Converts natural language into a preview of permitted schedule operations | Managed local Ollama + Rust `PlannerAgent` |
+| Reminders       | Stores one optional reminder per event and retries interrupted delivery   | SQLite outbox + native notification plugin |
+| Data safety     | Migrates, checks, backs up, exports, imports, and restores local data     | Rust + SQLite                              |
+| Distribution    | Produces signed macOS and Windows installers and user-approved updates    | GitHub Actions + Tauri updater             |
 
 The desktop edition is single-device and requires no account, API key, hosted backend, or cloud AI. The earlier SwiftUI / SwiftData / WidgetKit app remains available on the [`ios-swiftui`](https://github.com/Von-Van/DayPlan/tree/ios-swiftui) branch; its data is intentionally separate.
 
@@ -74,26 +74,26 @@ flowchart TB
 
 ### Layer responsibilities
 
-| Layer | Owns | Explicitly does not own |
-| --- | --- | --- |
-| React renderer | Interaction state, forms, previews, accessibility, strict public-response parsing | SQL, model processes, proposal operations, secrets, filesystem paths |
-| Tauri IPC | A narrow command surface, argument serialization, typed error responses | Business decisions or direct database queries |
-| Rust services | Validation, time-zone handling, AI context, proposal/session state, native workflows | Presentation state |
-| Repository | Transactions, revisions, migrations, integrity checks, backups, reminder outbox | Natural-language interpretation |
-| Ollama runtime | Local inference for one pinned model | Database access, cloud fallback, application updates |
+| Layer          | Owns                                                                                 | Explicitly does not own                                              |
+| -------------- | ------------------------------------------------------------------------------------ | -------------------------------------------------------------------- |
+| React renderer | Interaction state, forms, previews, accessibility, strict public-response parsing    | SQL, model processes, proposal operations, secrets, filesystem paths |
+| Tauri IPC      | A narrow command surface, argument serialization, typed error responses              | Business decisions or direct database queries                        |
+| Rust services  | Validation, time-zone handling, AI context, proposal/session state, native workflows | Presentation state                                                   |
+| Repository     | Transactions, revisions, migrations, integrity checks, backups, reminder outbox      | Natural-language interpretation                                      |
+| Ollama runtime | Local inference for one pinned model                                                 | Database access, cloud fallback, application updates                 |
 
 ### Repository map
 
-| Path | Responsibility |
-| --- | --- |
-| [`src/`](src/) | React views, interaction state, accessibility, styling, and strict frontend schemas |
-| [`src/api.ts`](src/api.ts) | Typed renderer-facing command client and Zod response boundary |
-| [`src-tauri/src/lib.rs`](src-tauri/src/lib.rs) | Tauri application composition, IPC commands, native plugins, tray, and reminder worker |
-| [`src-tauri/src/model.rs`](src-tauri/src/model.rs) | Domain records, AI mutation union, proposal types, and shared limits |
-| [`src-tauri/src/db.rs`](src-tauri/src/db.rs) | SQLite repository, transactions, migrations, backups, imports, and reminder outbox |
-| [`src-tauri/src/agent.rs`](src-tauri/src/agent.rs) | Prompt/context construction, tool schema, ambiguity rules, validation, and session proposals |
-| [`src-tauri/src/runtime.rs`](src-tauri/src/runtime.rs) | Bundled Ollama process, private endpoint, model download, diagnostics, and lifecycle |
-| [`eval/`](eval/) | Hand-labeled commands and machine-readable evaluation results |
+| Path                                                   | Responsibility                                                                               |
+| ------------------------------------------------------ | -------------------------------------------------------------------------------------------- |
+| [`src/`](src/)                                         | React views, interaction state, accessibility, styling, and strict frontend schemas          |
+| [`src/api.ts`](src/api.ts)                             | Typed renderer-facing command client and Zod response boundary                               |
+| [`src-tauri/src/lib.rs`](src-tauri/src/lib.rs)         | Tauri application composition, IPC commands, native plugins, tray, and reminder worker       |
+| [`src-tauri/src/model.rs`](src-tauri/src/model.rs)     | Domain records, AI mutation union, proposal types, and shared limits                         |
+| [`src-tauri/src/db.rs`](src-tauri/src/db.rs)           | SQLite repository, transactions, migrations, backups, imports, and reminder outbox           |
+| [`src-tauri/src/agent.rs`](src-tauri/src/agent.rs)     | Prompt/context construction, tool schema, ambiguity rules, validation, and session proposals |
+| [`src-tauri/src/runtime.rs`](src-tauri/src/runtime.rs) | Bundled Ollama process, private endpoint, model download, diagnostics, and lifecycle         |
+| [`eval/`](eval/)                                       | Hand-labeled commands and machine-readable evaluation results                                |
 
 ## Core data schema
 
@@ -152,7 +152,7 @@ sequenceDiagram
   Agent-->>UI: Clarification or server-owned proposalId + preview
   User->>UI: Apply proposal
   UI->>Agent: apply_schedule_changes(proposalId)
-  Agent->>DB: Recheck expiry, IDs, and revisions; apply one transaction
+  Agent->>DB: Recheck expiry, IDs, and revisions, then apply one transaction
   DB-->>UI: Updated events or typed failure with no partial mutation
 ```
 
@@ -229,10 +229,6 @@ It records the Ollama version, model tag/digest, per-case failures, schema compl
 - 100% safety/ambiguity cases;
 - at least 85% exact proposal accuracy; and
 - at least 95% field accuracy.
-
-### Current baseline
-
-No valid live baseline is committed yet. On August 14, 2026, the suite successfully launched through the bundled Ollama 0.32.0 runtime with cloud mode disabled and the locally verified `qwen3:8b` model. The full three-run job was not allowed to publish a partial score; at roughly 4–8 seconds per model-backed case on the test machine, it must be completed as a dedicated release-gate run. The harness still exits without a report when runtime/model availability fails. A completed three-run result against one recorded digest remains a beta release blocker.
 
 ## Development and quality gates
 
